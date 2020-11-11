@@ -476,6 +476,24 @@ class HBSYSTEM(DatagramProtocol):
                     self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Peer info from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
 
+        elif _command == DMRC:
+            _peer_id = _data[4:8]
+            logger.info('(%s) DMRC from %s. DMRC login not yet supported. HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
+            logger.info(self._peers[_peer_id])
+            '''
+            if _peer_id in self._peers \
+                        and self._peers[_peer_id]['CONNECTION'] == 'WAITING_CONFIG' \
+                        and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
+                _this_peer = self._peers[_peer_id]
+                _this_peer['CONNECTED'] = time()
+                _this_peer['LAST_PING'] = time()
+                _this_peer['COLORCODE'] = _data[8:10]
+                _this_peer['SLOTS'] = _data[10]
+                _this_peer['PACKAGE_ID'] = _data[11:51]
+                _this_peer['SOFTWARE_ID'] = _data[51:91]
+                logger.info('(%s) DMRC HBP PDU: %s', self._system, ahex(_data))
+            '''
+
         elif _command == RPTP:    # RPTPing -- peer is pinging us
                 _peer_id = _data[7:11]
                 if _peer_id in self._peers \
