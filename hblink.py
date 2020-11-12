@@ -498,25 +498,26 @@ class HBSYSTEM(DatagramProtocol):
                             'SOCKADDR': _sockaddr,
                             'IP': _sockaddr[0],
                             'PORT': _sockaddr[1],
-                            'SALT': randint(0,0xFFFFFFFF),
+                            'SALT': 0,
                             'RADIO_ID': str(int(ahex(_peer_id), 16)),
                             'CALLSIGN': _data[8:16],
                             'RX_FREQ': _data[16:25],
                             'TX_FREQ': _data[25:34],
-                            'TX_POWER': _data[34:41],
-                            'COLORCODE': _data[41:],
+                            'TX_POWER': _data[34:36],
+                            'COLORCODE': _data[36:38],
                             'LATITUDE': '',
                             'LONGITUDE': '',
                             'HEIGHT': '',
                             'LOCATION': '',
                             'DESCRIPTION': '',
-                            'SLOTS': '',
+                            'SLOTS': bytes([_data[38]]),
                             'URL': '',
-                            'SOFTWARE_ID': '',
-                            'PACKAGE_ID': '',
+                            'SOFTWARE_ID': _data[39:79],
+                            'PACKAGE_ID': _data[79:119],
                         }})
 
                         logger.info('(%s) DMRC login from %s. DMRC HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
+                        print(self._peers[_peer_id])
                 else:
                     self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Invalid DMRC Login or Update from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
