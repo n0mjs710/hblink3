@@ -482,9 +482,9 @@ class HBSYSTEM(DatagramProtocol):
             if len(self._peers) < self._config['MAX_PEERS']:
                 # Check for valid Radio ID
                 if acl_check(_peer_id, self._CONFIG['GLOBAL']['REG_ACL']) and acl_check(_peer_id, self._config['REG_ACL']):
-                    if _peer_id in self.peers \
-                            and self._peers[_peer_id][CONNECTED] == 'YES' \
-                            and self._peers[_peer_id][SOCKADDR] == _sockaddr:
+                    if _peer_id in self._peers:
+                        #    and self._peers[_peer_id][CONNECTED] == 'YES' \
+                        #    and self._peers[_peer_id][SOCKADDR] == _sockaddr:
                         self._peers[_peer_id]['PINGS_RECEIVED'] += 1
                         self._peers[_peer_id]['LAST_PING'] = time()
                         logger.debug('(%s) Received DMRC update from peer %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
