@@ -478,21 +478,46 @@ class HBSYSTEM(DatagramProtocol):
 
         elif _command == DMRC:
             _peer_id = _data[4:8]
-            logger.info('(%s) DMRC from %s. DMRC login not yet supported. HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
-            logger.info(self._peers[_peer_id])
-            '''
-            if _peer_id in self._peers \
-                        and self._peers[_peer_id]['CONNECTION'] == 'WAITING_CONFIG' \
-                        and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
-                _this_peer = self._peers[_peer_id]
-                _this_peer['CONNECTED'] = time()
-                _this_peer['LAST_PING'] = time()
-                _this_peer['COLORCODE'] = _data[8:10]
-                _this_peer['SLOTS'] = _data[10]
-                _this_peer['PACKAGE_ID'] = _data[11:51]
-                _this_peer['SOFTWARE_ID'] = _data[51:91]
-                logger.info('(%s) DMRC HBP PDU: %s', self._system, ahex(_data))
-            '''
+            # Check to see if we've reached the maximum number of allowed peers
+            if len(self._peers) < self._config['MAX_PEERS']:
+                # Check for valid Radio ID
+                if acl_check(_peer_id, self._CONFIG['GLOBAL']['REG_ACL']) and acl_check(_peer_id, self._config['REG_ACL']):
+                    # Build the configuration data strcuture for the peer
+                    self._peers.update({_peer_id: {
+                        'CONNECTION': 'YES',
+                        'CONNECTED': time(),
+                        'PINGS_RECEIVED': 0,
+                        'LAST_PING': time(),
+                        'SOCKADDR': _sockaddr,
+                        'IP': _sockaddr[0],
+                        'PORT': _sockaddr[1],
+                        'SALT': randint(0,0xFFFFFFFF),
+                        'RADIO_ID': str(int(ahex(_peer_id), 16)),
+                        'CALLSIGN': _data[8:16],
+                        'RX_FREQ': _data[16:25],
+                        'TX_FREQ': _data[25:34],
+                        'TX_POWER': _data[34:41],
+                        'COLORCODE': _data[41:],
+                        'LATITUDE': '',
+                        'LONGITUDE': '',
+                        'HEIGHT': '',
+                        'LOCATION': '',
+                        'DESCRIPTION': '',
+                        'SLOTS': '',
+                        'URL': '',
+                        'SOFTWARE_ID': '',
+                        'PACKAGE_ID': '',
+                    }})
+
+                    logger.info('(%s) DMRC login from %s. DMRC HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
+                    self.send_peer(_peer_id, b''.join(DMRD, _peer_id))
+                    #self.send_peer(_peer_id, b''.join([MSTPONG, _peer_id]))
+                else:
+                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
+            else:
+                self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied, Maximum number of peers exceeded', self._system, _sockaddr[0], int_id(_peer_id))
 
         elif _command == RPTP:    # RPTPing -- peer is pinging us
                 _peer_id = _data[7:11]
@@ -518,7 +543,7 @@ class HBSYSTEM(DatagramProtocol):
         elif _command == DMRA:
             _peer_id = _data[4:8]
             logger.info('(%s) Recieved DMR Talker Alias from peer %s, subscriber %s', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_rf_src))
-            
+
         else:
             logger.error('(%s) Unrecognized command. Raw HBP PDU: %s', self._system, ahex(_data))
 
