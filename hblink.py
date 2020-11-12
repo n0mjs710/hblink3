@@ -482,39 +482,44 @@ class HBSYSTEM(DatagramProtocol):
             if len(self._peers) < self._config['MAX_PEERS']:
                 # Check for valid Radio ID
                 if acl_check(_peer_id, self._CONFIG['GLOBAL']['REG_ACL']) and acl_check(_peer_id, self._config['REG_ACL']):
-                    # Build the configuration data strcuture for the peer
-                    self._peers.update({_peer_id: {
-                        'CONNECTION': 'YES',
-                        'CONNECTED': time(),
-                        'PINGS_RECEIVED': 0,
-                        'LAST_PING': time(),
-                        'SOCKADDR': _sockaddr,
-                        'IP': _sockaddr[0],
-                        'PORT': _sockaddr[1],
-                        'SALT': randint(0,0xFFFFFFFF),
-                        'RADIO_ID': str(int(ahex(_peer_id), 16)),
-                        'CALLSIGN': _data[8:16],
-                        'RX_FREQ': _data[16:25],
-                        'TX_FREQ': _data[25:34],
-                        'TX_POWER': _data[34:41],
-                        'COLORCODE': _data[41:],
-                        'LATITUDE': '',
-                        'LONGITUDE': '',
-                        'HEIGHT': '',
-                        'LOCATION': '',
-                        'DESCRIPTION': '',
-                        'SLOTS': '',
-                        'URL': '',
-                        'SOFTWARE_ID': '',
-                        'PACKAGE_ID': '',
-                    }})
+                    if _peer_id in self.peers \
+                            and self._peers[_peer_id][CONNECTED] == 'YES' \
+                            and self._peers[_peer_id][SOCKADDR] == _sockaddr:
+                        self._peers[_peer_id]['PINGS_RECEIVED'] += 1
+                        self._peers[_peer_id]['LAST_PING'] = time()
+                        logger.debug('(%s) Received DMRC update from peer %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
+                    else:
+                        # Build the configuration data strcuture for the peer
+                        self._peers.update({_peer_id: {
+                            'CONNECTION': 'YES',
+                            'CONNECTED': time(),
+                            'PINGS_RECEIVED': 0,
+                            'LAST_PING': time(),
+                            'SOCKADDR': _sockaddr,
+                            'IP': _sockaddr[0],
+                            'PORT': _sockaddr[1],
+                            'SALT': randint(0,0xFFFFFFFF),
+                            'RADIO_ID': str(int(ahex(_peer_id), 16)),
+                            'CALLSIGN': _data[8:16],
+                            'RX_FREQ': _data[16:25],
+                            'TX_FREQ': _data[25:34],
+                            'TX_POWER': _data[34:41],
+                            'COLORCODE': _data[41:],
+                            'LATITUDE': '',
+                            'LONGITUDE': '',
+                            'HEIGHT': '',
+                            'LOCATION': '',
+                            'DESCRIPTION': '',
+                            'SLOTS': '',
+                            'URL': '',
+                            'SOFTWARE_ID': '',
+                            'PACKAGE_ID': '',
+                        }})
 
-                    logger.info('(%s) DMRC login from %s. DMRC HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
-                    self.send_peer(_peer_id, b''.join(DMRD, _peer_id))
-                    #self.send_peer(_peer_id, b''.join([MSTPONG, _peer_id]))
+                        logger.info('(%s) DMRC login from %s. DMRC HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
                 else:
                     self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
-                    logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
+                    logger.warning('(%s) Invalid DMRC Login or Update from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
             else:
                 self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
                 logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied, Maximum number of peers exceeded', self._system, _sockaddr[0], int_id(_peer_id))
