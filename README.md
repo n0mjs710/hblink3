@@ -1,17 +1,8 @@
----
-### FOR SUPPORT, DISCUSSION, GETTING INVOLVED ###
-
-Please join the DVSwitch group at groups.io for online forum support, discussion, and to become part of the development team.
-
-DVSwitch@groups.io 
-
-A voluntary registrty for HBlink systems with public access has been created at http://hblink-register.com.es Please consider listing your system if you allow open access.
-
----
-
 ## PROJECT: Open Source HomeBrew Repeater Proctol Client/Master. ##
 
 **UPDATES:**
+
+No longer updated. This project is depreciated. HBlink4 is the current version that is in active development
 
 **PURPOSE:** Thanks to the work of Jonathan Naylor, G4KLX; Hans Barthen, DL5DI; Torsten Shultze, DG1HT we have an open protocol for internetworking DMR repeaters. Unfortunately, there's no generic client and/or master stacks. This project is to build an open-source, python-based implementation. You are free to use this software however you want, however we ask that you provide attribution in some public venue (such as project, club, organization web site). This helps us see where the software is in use and track how it is used.
 
