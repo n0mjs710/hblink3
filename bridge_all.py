@@ -35,7 +35,6 @@ a lot of sense, and has the potential to do bad things.
 
 # Python modules we need
 import sys
-from bitarray import bitarray
 from time import time
 from importlib import import_module
 from types import ModuleType
@@ -48,7 +47,6 @@ from twisted.internet import reactor, task
 # Things we import from the main hblink module
 from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, reportFactory, REPORT_OPCODES, config_reports, mk_aliases, acl_check
 from dmr_utils3.utils import bytes_3, int_id, get_alias
-from dmr_utils3 import decode, bptc, const
 import config
 import log
 import const
@@ -95,7 +93,7 @@ class bridgeallSYSTEM(HBSYSTEM):
                 },
             2: {
                 'RX_START':     time(),
-                'RX:LOSS':      0,
+                'RX_LOSS':      0,
                 'RX_SEQ':       0,
                 'RX_RFS':       b'\x00',
                 'TX_RFS':       b'\x00',

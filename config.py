@@ -161,7 +161,6 @@ def build_config(_config_file):
                         'MODE': config.get(section, 'MODE'),
                         'ENABLED': config.getboolean(section, 'ENABLED'),
                         'LOOSE': config.getboolean(section, 'LOOSE'),
-                        'SOCK_ADDR': getaddrinfo(config.get(section, 'IP'), config.getint(section, 'PORT'), proto=17)[0][4],
                         'IP': getaddrinfo(config.get(section, 'IP'), 0)[0][4][0],
                         'PORT': config.getint(section, 'PORT'),
                         'MASTER_SOCKADDR': getaddrinfo(config.get(section, 'MASTER_IP'), config.getint(section, 'MASTER_PORT'), proto=17)[0][4],
