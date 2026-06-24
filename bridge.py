@@ -71,7 +71,31 @@ __email__      = 'n0mjs@me.com'
 # This is for pruning unit-to-uint calls to not broadcast once the
 # target system for a unit is identified
 # format 'unit_id': ('SYSTEM', time)
-UNIT_MAP = {} 
+UNIT_MAP = {}
+
+
+# Generate the full (header & terminator) and embedded Link Control for a
+# re-targeted group stream. Returns (H_LC, T_LC, EMB_LC). Pure -- no side effects.
+def gen_lcs(_dst_lc):
+    return bptc.encode_header_lc(_dst_lc), bptc.encode_terminator_lc(_dst_lc), bptc.encode_emblc(_dst_lc)
+
+
+# Rewrite the DMR payload's embedded/full Link Control for a re-targeted group
+# stream and return the new 33-byte payload. The middle (voice/sync) bits are
+# preserved from the source packet; only the LC portions are replaced. Pure.
+def embed_lc(_dmrpkt, _frame_type, _dtype_vseq, _h_lc, _t_lc, _emb_lc):
+    dmrbits = bitarray(endian='big')
+    dmrbits.frombytes(_dmrpkt)
+    # Create a voice header packet (FULL LC)
+    if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
+        dmrbits = _h_lc[0:98] + dmrbits[98:166] + _h_lc[98:197]
+    # Create a voice terminator packet (FULL LC)
+    elif _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM:
+        dmrbits = _t_lc[0:98] + dmrbits[98:166] + _t_lc[98:197]
+    # Create a Burst B-E packet (Embedded LC)
+    elif _dtype_vseq in [1,2,3,4]:
+        dmrbits = dmrbits[0:116] + _emb_lc[_dtype_vseq] + dmrbits[148:264]
+    return dmrbits.tobytes()
 
 
 # Timed loop used for reporting HBP status
@@ -287,9 +311,7 @@ class routerOBP(OPENBRIDGE):
                                     }
                                     # Generate LCs (full and EMB) for the TX stream
                                     dst_lc = b''.join([self.STATUS[_stream_id]['LC'][0:3], _target['TGID'], _rf_src])
-                                    _target_status[_stream_id]['H_LC'] = bptc.encode_header_lc(dst_lc)
-                                    _target_status[_stream_id]['T_LC'] = bptc.encode_terminator_lc(dst_lc)
-                                    _target_status[_stream_id]['EMB_LC'] = bptc.encode_emblc(dst_lc)
+                                    _target_status[_stream_id]['H_LC'], _target_status[_stream_id]['T_LC'], _target_status[_stream_id]['EMB_LC'] = gen_lcs(dst_lc)
 
                                     logger.info('(%s) Conference Bridge: %s, Call Bridged to OBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                     if CONFIG['REPORTS']['REPORT']:
@@ -306,22 +328,12 @@ class routerOBP(OPENBRIDGE):
                                 # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                                 # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                                 # if _dst_id != rule['DST_GROUP']:
-                                dmrbits = bitarray(endian='big')
-                                dmrbits.frombytes(dmrpkt)
-                                # Create a voice header packet (FULL LC)
-                                if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
-                                    dmrbits = _target_status[_stream_id]['H_LC'][0:98] + dmrbits[98:166] + _target_status[_stream_id]['H_LC'][98:197]
-                                # Create a voice terminator packet (FULL LC)
-                                elif _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM:
-                                    dmrbits = _target_status[_stream_id]['T_LC'][0:98] + dmrbits[98:166] + _target_status[_stream_id]['T_LC'][98:197]
-                                    if CONFIG['REPORTS']['REPORT']:
-                                        call_duration = pkt_time - _target_status[_stream_id]['START']
-                                        _target_status[_stream_id]['ACTIVE'] = False
-                                        systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))              
-                                # Create a Burst B-E packet (Embedded LC)
-                                elif _dtype_vseq in [1,2,3,4]:
-                                    dmrbits = dmrbits[0:116] + _target_status[_stream_id]['EMB_LC'][_dtype_vseq] + dmrbits[148:264]
-                                dmrpkt = dmrbits.tobytes()
+                                dmrpkt = embed_lc(dmrpkt, _frame_type, _dtype_vseq, _target_status[_stream_id]['H_LC'], _target_status[_stream_id]['T_LC'], _target_status[_stream_id]['EMB_LC'])
+                                # On the voice terminator, finalize the target stream and report the call end
+                                if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM and CONFIG['REPORTS']['REPORT']:
+                                    call_duration = pkt_time - _target_status[_stream_id]['START']
+                                    _target_status[_stream_id]['ACTIVE'] = False
+                                    systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
                                 _tmp_data = b''.join([_tmp_data, dmrpkt])
 
                             else:
@@ -365,9 +377,7 @@ class routerOBP(OPENBRIDGE):
                                     _target_status[_target['TS']]['TX_PEER'] = _peer_id
                                     # Generate LCs (full and EMB) for the TX stream
                                     dst_lc = b''.join([self.STATUS[_stream_id]['LC'][0:3], _target['TGID'], _rf_src])
-                                    _target_status[_target['TS']]['TX_H_LC'] = bptc.encode_header_lc(dst_lc)
-                                    _target_status[_target['TS']]['TX_T_LC'] = bptc.encode_terminator_lc(dst_lc)
-                                    _target_status[_target['TS']]['TX_EMB_LC'] = bptc.encode_emblc(dst_lc)
+                                    _target_status[_target['TS']]['TX_H_LC'], _target_status[_target['TS']]['TX_T_LC'], _target_status[_target['TS']]['TX_EMB_LC'] = gen_lcs(dst_lc)
                                     logger.debug('(%s) Generating TX FULL and EMB LCs for HomeBrew destination: System: %s, TS: %s, TGID: %s', self._system, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                     logger.info('(%s) Conference Bridge: %s, Call Bridged to HBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                     if CONFIG['REPORTS']['REPORT']:
@@ -389,21 +399,11 @@ class routerOBP(OPENBRIDGE):
                                 # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                                 # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                                 # if _dst_id != rule['DST_GROUP']:
-                                dmrbits = bitarray(endian='big')
-                                dmrbits.frombytes(dmrpkt)
-                                # Create a voice header packet (FULL LC)
-                                if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
-                                    dmrbits = _target_status[_target['TS']]['TX_H_LC'][0:98] + dmrbits[98:166] + _target_status[_target['TS']]['TX_H_LC'][98:197]
-                                # Create a voice terminator packet (FULL LC)
-                                elif _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM:
-                                    dmrbits = _target_status[_target['TS']]['TX_T_LC'][0:98] + dmrbits[98:166] + _target_status[_target['TS']]['TX_T_LC'][98:197]
-                                    if CONFIG['REPORTS']['REPORT']:
-                                        call_duration = pkt_time - _target_status[_target['TS']]['TX_START']
-                                        systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
-                                # Create a Burst B-E packet (Embedded LC)
-                                elif _dtype_vseq in [1,2,3,4]:
-                                    dmrbits = dmrbits[0:116] + _target_status[_target['TS']]['TX_EMB_LC'][_dtype_vseq] + dmrbits[148:264]
-                                dmrpkt = dmrbits.tobytes()
+                                dmrpkt = embed_lc(dmrpkt, _frame_type, _dtype_vseq, _target_status[_target['TS']]['TX_H_LC'], _target_status[_target['TS']]['TX_T_LC'], _target_status[_target['TS']]['TX_EMB_LC'])
+                                # On the voice terminator, report the call end
+                                if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM and CONFIG['REPORTS']['REPORT']:
+                                    call_duration = pkt_time - _target_status[_target['TS']]['TX_START']
+                                    systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
                                 _tmp_data = b''.join([_tmp_data, dmrpkt, b'\x00\x00']) # Add two bytes of nothing since OBP doesn't include BER & RSSI bytes #_data[53:55]
 
                             # Transmit the packet to the destination system
@@ -706,9 +706,7 @@ class routerHBP(HBSYSTEM):
                                         }
                                         # Generate LCs (full and EMB) for the TX stream
                                         dst_lc = b''.join([self.STATUS[_slot]['RX_LC'][0:3], _target['TGID'], _rf_src])
-                                        _target_status[_stream_id]['H_LC'] = bptc.encode_header_lc(dst_lc)
-                                        _target_status[_stream_id]['T_LC'] = bptc.encode_terminator_lc(dst_lc)
-                                        _target_status[_stream_id]['EMB_LC'] = bptc.encode_emblc(dst_lc)
+                                        _target_status[_stream_id]['H_LC'], _target_status[_stream_id]['T_LC'], _target_status[_stream_id]['EMB_LC'] = gen_lcs(dst_lc)
 
                                         logger.info('(%s) Conference Bridge: %s, Call Bridged to OBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                         if CONFIG['REPORTS']['REPORT']:
@@ -725,22 +723,12 @@ class routerHBP(HBSYSTEM):
                                     # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                                     # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                                     # if _dst_id != rule['DST_GROUP']:
-                                    dmrbits = bitarray(endian='big')
-                                    dmrbits.frombytes(dmrpkt)
-                                    # Create a voice header packet (FULL LC)
-                                    if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
-                                        dmrbits = _target_status[_stream_id]['H_LC'][0:98] + dmrbits[98:166] + _target_status[_stream_id]['H_LC'][98:197]
-                                    # Create a voice terminator packet (FULL LC)
-                                    elif _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM:
-                                        dmrbits = _target_status[_stream_id]['T_LC'][0:98] + dmrbits[98:166] + _target_status[_stream_id]['T_LC'][98:197]
-                                        if CONFIG['REPORTS']['REPORT']:
-                                            call_duration = pkt_time - _target_status[_stream_id]['START']
-                                            _target_status[_stream_id]['ACTIVE'] = False
-                                            systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
-                                    # Create a Burst B-E packet (Embedded LC)
-                                    elif _dtype_vseq in [1,2,3,4]:
-                                        dmrbits = dmrbits[0:116] + _target_status[_stream_id]['EMB_LC'][_dtype_vseq] + dmrbits[148:264]
-                                    dmrpkt = dmrbits.tobytes()
+                                    dmrpkt = embed_lc(dmrpkt, _frame_type, _dtype_vseq, _target_status[_stream_id]['H_LC'], _target_status[_stream_id]['T_LC'], _target_status[_stream_id]['EMB_LC'])
+                                    # On the voice terminator, finalize the target stream and report the call end
+                                    if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM and CONFIG['REPORTS']['REPORT']:
+                                        call_duration = pkt_time - _target_status[_stream_id]['START']
+                                        _target_status[_stream_id]['ACTIVE'] = False
+                                        systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
                                     _tmp_data = b''.join([_tmp_data, dmrpkt])
 
                                 else:
@@ -780,9 +768,7 @@ class routerHBP(HBSYSTEM):
                                         _target_status[_target['TS']]['TX_PEER'] = _peer_id
                                         # Generate LCs (full and EMB) for the TX stream
                                         dst_lc = self.STATUS[_slot]['RX_LC'][0:3] + _target['TGID'] + _rf_src
-                                        _target_status[_target['TS']]['TX_H_LC'] = bptc.encode_header_lc(dst_lc)
-                                        _target_status[_target['TS']]['TX_T_LC'] = bptc.encode_terminator_lc(dst_lc)
-                                        _target_status[_target['TS']]['TX_EMB_LC'] = bptc.encode_emblc(dst_lc)
+                                        _target_status[_target['TS']]['TX_H_LC'], _target_status[_target['TS']]['TX_T_LC'], _target_status[_target['TS']]['TX_EMB_LC'] = gen_lcs(dst_lc)
                                         logger.debug('(%s) Generating TX FULL and EMB LCs for HomeBrew destination: System: %s, TS: %s, TGID: %s', self._system, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                         logger.info('(%s) Conference Bridge: %s, Call Bridged to HBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                         if CONFIG['REPORTS']['REPORT']:
@@ -801,21 +787,11 @@ class routerHBP(HBSYSTEM):
                                     # Assemble transmit HBP packet header
                                     _tmp_data = b''.join([_data[:8], _target['TGID'], _data[11:15], _tmp_bits.to_bytes(1, 'big'), _data[16:20]])
 
-                                    dmrbits = bitarray(endian='big')
-                                    dmrbits.frombytes(dmrpkt)
-                                    # Create a voice header packet (FULL LC)
-                                    if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
-                                        dmrbits = _target_status[_target['TS']]['TX_H_LC'][0:98] + dmrbits[98:166] + _target_status[_target['TS']]['TX_H_LC'][98:197]
-                                    # Create a voice terminator packet (FULL LC)
-                                    elif _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM:
-                                        dmrbits = _target_status[_target['TS']]['TX_T_LC'][0:98] + dmrbits[98:166] + _target_status[_target['TS']]['TX_T_LC'][98:197]
-                                        if CONFIG['REPORTS']['REPORT']:
-                                            call_duration = pkt_time - _target_status[_target['TS']]['TX_START']
-                                            systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
-                                    # Create a Burst B-E packet (Embedded LC)
-                                    elif _dtype_vseq in [1,2,3,4]:
-                                        dmrbits = dmrbits[0:116] + _target_status[_target['TS']]['TX_EMB_LC'][_dtype_vseq] + dmrbits[148:264]
-                                    dmrpkt = dmrbits.tobytes()
+                                    dmrpkt = embed_lc(dmrpkt, _frame_type, _dtype_vseq, _target_status[_target['TS']]['TX_H_LC'], _target_status[_target['TS']]['TX_T_LC'], _target_status[_target['TS']]['TX_EMB_LC'])
+                                    # On the voice terminator, report the call end
+                                    if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM and CONFIG['REPORTS']['REPORT']:
+                                        call_duration = pkt_time - _target_status[_target['TS']]['TX_START']
+                                        systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
                                     _tmp_data = b''.join([_tmp_data, dmrpkt, _data[53:55]])
 
                                 # Transmit the packet to the destination system
