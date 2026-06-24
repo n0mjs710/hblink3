@@ -13,10 +13,38 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import random
+
 import const
 import config
 import hblink
-from dmr_utils3.utils import bytes_3
+from dmr_utils3.utils import bytes_3, bytes_4
+
+
+# Reference implementation of the ORIGINAL linear ACL semantics, used to prove
+# the bisect-based acl_check is behavior-identical.
+def _ref_build(_acl, _max):
+    if not _acl:
+        return (True, [(const.ID_MIN, _max)])
+    action = (_acl.split(':')[0] == 'PERMIT')
+    ranges = []
+    for entry in _acl.split(':')[1].split(','):
+        if entry == 'ALL':
+            return (action, [(const.ID_MIN, _max)])
+        elif '-' in entry:
+            s, e = entry.split('-')
+            ranges.append((int(s), int(e)))
+        else:
+            ranges.append((int(entry), int(entry)))
+    return (action, ranges)
+
+
+def _ref_check(_id, _ref):
+    action, ranges = _ref
+    for s, e in ranges:
+        if s <= _id <= e:
+            return action
+    return not action
 
 
 def _acl(_str):
@@ -102,6 +130,58 @@ class TestAclDedup(unittest.TestCase):
             self.assertTrue(sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 1, SID2))
         drops = [m for m in cm.output if 'CALL DROPPED' in m]
         self.assertEqual(len(drops), 2)
+
+
+class TestAclCheckEquivalence(unittest.TestCase):
+    # The bisect-based acl_check must match the original linear semantics for
+    # every ACL shape: permit/deny, singles, ranges, overlapping/adjacent
+    # ranges, ALL, and large enumerated lists.
+    SPECS = [
+        'PERMIT:ALL',
+        'DENY:1',
+        'DENY:1-100',
+        'PERMIT:3100-3200',
+        'DENY:9,10,3129',
+        'PERMIT:1-5,3-10,100',          # overlapping ranges
+        'DENY:1-10,11-20',              # adjacent ranges
+        'PERMIT:50,40,30,20,10',        # unsorted singles
+        'DENY:5-5',                     # degenerate range == single
+    ]
+
+    def test_matches_linear_reference(self):
+        probe = [0, 1, 2, 5, 9, 10, 11, 20, 50, 100, 101, 3099, 3129, 3200, 3201,
+                 const.ID_MAX, const.ID_MAX + 1]
+        for spec in self.SPECS:
+            built = config.acl_build(spec, const.ID_MAX)
+            ref = _ref_build(spec, const.ID_MAX)
+            for i in probe:
+                self.assertEqual(
+                    hblink.acl_check(bytes_4(i), built),
+                    _ref_check(i, ref),
+                    'spec={!r} id={}'.format(spec, i))
+
+    def test_large_enumerated_acl_matches_reference(self):
+        random.seed(42)
+        ids = random.sample(range(1, const.ID_MAX), 800)
+        spec = 'DENY:' + ','.join(str(i) for i in ids)
+        built = config.acl_build(spec, const.ID_MAX)
+        ref = _ref_build(spec, const.ID_MAX)
+        denied = set(ids)
+        for i in ids[:200] + random.sample(range(1, const.ID_MAX), 200):
+            self.assertEqual(hblink.acl_check(bytes_4(i), built), _ref_check(i, ref))
+            # spot check the actual intent too: listed ids are denied
+            self.assertEqual(hblink.acl_check(bytes_4(i), built), i not in denied)
+
+    def test_ranges_are_merged_and_disjoint(self):
+        action, singles, starts, ends = config.acl_build('DENY:1-10,5-20,22', const.ID_MAX)
+        self.assertEqual(starts, (1,))
+        self.assertEqual(ends, (20,))
+        self.assertIn(22, singles)
+
+    def test_blank_acl_permits_all(self):
+        built = config.acl_build('', const.ID_MAX)
+        self.assertTrue(hblink.acl_check(bytes_4(1), built))
+        self.assertTrue(hblink.acl_check(bytes_4(const.ID_MAX), built))
 
 
 if __name__ == '__main__':

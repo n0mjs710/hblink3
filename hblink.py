@@ -35,6 +35,7 @@ from hashlib import sha256, sha1
 from hmac import new as hmac_new, compare_digest
 from time import time
 from collections import deque
+from bisect import bisect_right
 
 # Twisted is pretty important, so I keep it separate
 from twisted.internet.protocol import DatagramProtocol, Factory, Protocol
@@ -91,13 +92,18 @@ def hblink_handler(_signal, _frame):
         systems[system].dereg()
 
 # Check a supplied ID against the ACL provided. Returns action (True|False) based
-# on matching and the action specified.
+# on matching and the action specified. The ACL is the structure produced by
+# config.acl_build: (action, singles_frozenset, range_starts, range_ends), where
+# the ranges are sorted and disjoint so a single bisect locates any match.
 def acl_check(_id, _acl):
     id = int_id(_id)
-    for entry in _acl[1]:
-        if entry[0] <= id <= entry[1]:
-            return _acl[0]
-    return not _acl[0]
+    action, singles, starts, ends = _acl
+    if id in singles:
+        return action
+    i = bisect_right(starts, id) - 1
+    if i >= 0 and id <= ends[i]:
+        return action
+    return not action
 
 
 #************************************************

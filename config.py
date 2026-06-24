@@ -62,41 +62,56 @@ def process_acls(_config):
         for acl in ['SUB_ACL', 'TG1_ACL', 'TG2_ACL']:
             _config['SYSTEMS'][system][acl] = acl_build(_config['SYSTEMS'][system][acl], const.ID_MAX)
 
-# Create an access control list that is programatically useable from human readable:
+# Merge a list of (start, end) ranges into a minimal sorted list of disjoint
+# ranges. Required so acl_check can locate a match with a single bisect.
+def merge_ranges(_ranges):
+    merged = []
+    for start, end in sorted(_ranges):
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+# Create an access control list that is programatically usable from human readable.
+# Single IDs go in a set (O(1) membership); ranges are merged and split into
+# parallel sorted (starts, ends) tuples so acl_check can bisect them (O(log n)).
 # ORIGINAL:  'DENY:1-5,3120101,3120124'
-# PROCESSED: (False, set([(1, 5), (3120124, 3120124), (3120101, 3120101)]))
+# PROCESSED: (False, frozenset({3120101, 3120124}), (1,), (5,))
 def acl_build(_acl, _max):
     if not _acl:
-        return(True, set((const.ID_MIN, _max)))
+        return (True, frozenset(), (const.ID_MIN,), (_max,))
 
-    acl = [] #set()
+    singles = set()
+    ranges = []
     sections = _acl.split(':')
 
-    if sections[0] == 'PERMIT':
-        action = True
-    else:
-        action = False
+    action = (sections[0] == 'PERMIT')
 
     for entry in sections[1].split(','):
         if entry == 'ALL':
-            acl.append((const.ID_MIN, _max))
+            ranges = [(const.ID_MIN, _max)]
+            singles = set()
             break
 
         elif '-' in entry:
             start,end = entry.split('-')
             start,end = int(start), int(end)
             if (const.ID_MIN <= start <= _max) or (const.ID_MIN <= end <= _max):
-                acl.append((start, end))
+                ranges.append((start, end))
             else:
                 sys.exit('ACL CREATION ERROR, VALUE OUT OF RANGE ({} - {})IN RANGE-BASED ENTRY: {}'.format(const.ID_MIN, _max, entry))
         else:
             id = int(entry)
             if (const.ID_MIN <= id <= _max):
-                acl.append((id, id))
+                singles.add(id)
             else:
                  sys.exit('ACL CREATION ERROR, VALUE OUT OF RANGE ({} - {}) IN SINGLE ID ENTRY: {}'.format(const.ID_MIN, _max, entry))
 
-    return (action, acl)
+    merged = merge_ranges(ranges)
+    starts = tuple(r[0] for r in merged)
+    ends = tuple(r[1] for r in merged)
+    return (action, frozenset(singles), starts, ends)
 
 def build_config(_config_file):
     config = configparser.ConfigParser()
@@ -269,11 +284,15 @@ if __name__ == '__main__':
     CONFIG = build_config(cli_args.CONFIG_FILE)
     pprint(CONFIG)
     
+    from bisect import bisect_right
     def acl_check(_id, _acl):
         id = int_id(_id)
-        for entry in _acl[1]:
-            if entry[0] <= id <= entry[1]:
-                return _acl[0]
-        return not _acl[0]
+        action, singles, starts, ends = _acl
+        if id in singles:
+            return action
+        i = bisect_right(starts, id) - 1
+        if i >= 0 and id <= ends[i]:
+            return action
+        return not action
         
     print(acl_check(b'\x00\x01\x37', CONFIG['GLOBAL']['TG1_ACL']))
