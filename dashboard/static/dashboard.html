@@ -63,6 +63,7 @@
 
 <script>
 const ST = { systems:{}, bridges:{}, active:{}, log:[], hblink:false };
+const STALE = 30000;   // drop an active call this many ms after START if no END arrives
 
 // ---------- helpers ----------
 const el = id => document.getElementById(id);
@@ -175,6 +176,10 @@ function renderLog(){ el('log').innerHTML = ST.log.map(logRow).join(''); }
 // ---------- live tick ----------
 setInterval(()=>{
   const now=Date.now();
+  // reap stale active streams whose END never arrived (interrupted/lost calls)
+  let reaped=false;
+  for(const k in ST.active){ if(now-ST.active[k]._arrived>STALE){ delete ST.active[k]; reaped=true; } }
+  if(reaped) renderAll();
   document.querySelectorAll('.js-since').forEach(s=>{ s.textContent=dur((+s.dataset.base)+(now-(+s.dataset.arr))/1000); });
   document.querySelectorAll('.js-dur').forEach(s=>{ s.textContent=dur((now-(+s.dataset.start))/1000); });
   document.querySelectorAll('.js-countdown').forEach(s=>{ const r=(+s.dataset.rem)-(now-(+s.dataset.arr))/1000; s.textContent=r<=0?'expired':dur(r); });

@@ -48,6 +48,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('hbdash')
 
+# Drop an "active" stream this many seconds after its START if no END arrives.
+# Real calls end well within this; it clears phantoms left by interrupted calls
+# or a lost/late terminator. (HBlink3's own stream trimmer times out at ~5s.)
+STREAM_STALE = 30
+
 
 # ---- alias resolution --------------------------------------------------------
 def _abs(p):
@@ -142,6 +147,7 @@ async def handle_event(evt):
         enrich_stream(evt)
         key = stream_key(evt)
         if evt['action'] == 'START':
+            evt['_seen'] = time.time()
             STATE.streams[key] = evt
         else:
             STATE.streams.pop(key, None)
@@ -181,11 +187,24 @@ async def hblink_feed():
         await asyncio.sleep(3)                              # reconnect delay
 
 
+async def reap_streams():
+    while True:
+        await asyncio.sleep(5)
+        now = time.time()
+        stale = [k for k, e in STATE.streams.items() if now - e.get('_seen', now) > STREAM_STALE]
+        for k in stale:
+            STATE.streams.pop(k, None)
+        if stale:
+            logger.debug('reaped %d stale stream(s)', len(stale))
+
+
 @asynccontextmanager
 async def lifespan(app):
-    task = asyncio.create_task(hblink_feed())
+    feed = asyncio.create_task(hblink_feed())
+    reaper = asyncio.create_task(reap_streams())
     yield
-    task.cancel()
+    feed.cancel()
+    reaper.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
