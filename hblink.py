@@ -45,7 +45,7 @@ from const import *
 from dmr_utils3.utils import int_id, bytes_4, try_download, mk_id_dict
 
 # Imports for the reporting server
-import pickle
+import json
 from reporting_const import *
 
 # The module needs logging logging, but handlers, etc. are controlled by the parent
@@ -708,12 +708,13 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 #
 # Socket-based reporting section
 #
-# Per-connection reporting protocol. Frames messages as netstrings ("<len>:<data>,")
-# to preserve the wire format the previous twisted NetstringReceiver used.
+# Per-connection reporting protocol. The wire format is newline-delimited JSON
+# (NDJSON): each message is one json.dumps(...) object terminated by '\n'. A
+# consumer (such as the dashboard) connects and passively receives a config
+# snapshot followed by a live stream of events.
 class report(asyncio.Protocol):
     def __init__(self, factory):
         self._factory = factory
-        self._buf = bytearray()
         self.transport = None
 
     def connection_made(self, transport):
@@ -723,49 +724,82 @@ class report(asyncio.Protocol):
         if host in clients or '*' in clients:
             self.transport = transport
             self._factory.clients.append(self)
-            logger.info('(REPORT) HBlink reporting client connected: %s', peername)
+            logger.info('(REPORT) reporting client connected: %s', peername)
+            self._factory.send_initial(self)
         else:
-            logger.error('(REPORT) Invalid report server connection attempt from: %s', peername)
+            logger.error('(REPORT) Invalid report client connection attempt from: %s', peername)
             transport.close()
 
     def connection_lost(self, exc):
         if self in self._factory.clients:
             self._factory.clients.remove(self)
-        logger.info('(REPORT) HBlink reporting client disconnected')
+        logger.info('(REPORT) reporting client disconnected')
 
     def data_received(self, data):
-        self._buf += data
-        # Parse as many complete netstrings as are buffered
-        while True:
-            colon = self._buf.find(b':')
-            if colon < 0:
-                break
-            try:
-                length = int(self._buf[:colon].decode('ascii'))
-            except ValueError:
-                logger.error('(REPORT) malformed netstring, dropping client buffer')
-                self._buf.clear()
-                break
-            end = colon + 1 + length
-            if len(self._buf) < end + 1:        # need full payload plus trailing comma
-                break
-            payload = bytes(self._buf[colon + 1:end])
-            del self._buf[:end + 1]
-            self.process_message(payload)
+        pass    # consumers are passive; nothing to read from them
 
-    def send_string(self, _data):
-        self.transport.write(b''.join([str(len(_data)).encode(), b':', _data, b',']))
+    def send_raw(self, _line):
+        self.transport.write(_line)
 
-    def process_message(self, _message):
-        opcode = _message[:1]
-        if opcode == REPORT_OPCODES['CONFIG_REQ']:
-            logger.info('(REPORT) HBlink reporting client sent \'CONFIG_REQ\': %s', self.transport.get_extra_info('peername'))
-            self._factory.send_config()
-        else:
-            logger.error('(REPORT) got unknown opcode')
 
-# Manages the set of connected reporting clients. Doubles as the asyncio
-# protocol factory (it is callable) passed to loop.create_server().
+# Build a JSON-serializable view of the SYSTEMS config for consumers. Bytes
+# fields are decoded and DMR IDs converted to integers; secrets (passphrases) and
+# internal ACL structures are intentionally omitted.
+def json_systems(_systems):
+    def s(_v):
+        return _v.decode('utf-8', errors='ignore').strip() if isinstance(_v, (bytes, bytearray)) else _v
+
+    out = {}
+    for name, c in _systems.items():
+        mode = c['MODE']
+        view = {'MODE': mode, 'ENABLED': c['ENABLED']}
+        if mode == 'MASTER':
+            view['REPEAT'] = c.get('REPEAT', False)
+            view['MAX_PEERS'] = c.get('MAX_PEERS')
+            peers = {}
+            for pid, p in c['PEERS'].items():
+                peers[str(int_id(pid))] = {
+                    'RADIO_ID':   int_id(pid),
+                    'CALLSIGN':   s(p.get('CALLSIGN', '')),
+                    'LOCATION':   s(p.get('LOCATION', '')),
+                    'IP':         p.get('IP', ''),
+                    'PORT':       p.get('PORT', ''),
+                    'CONNECTED':  p.get('CONNECTED', 0),
+                    'CONNECTION': p.get('CONNECTION', ''),
+                    'RX_FREQ':    s(p.get('RX_FREQ', '')),
+                    'TX_FREQ':    s(p.get('TX_FREQ', '')),
+                    'COLORCODE':  s(p.get('COLORCODE', '')),
+                    'SLOTS':      s(p.get('SLOTS', '')),
+                }
+            view['PEERS'] = peers
+        elif mode == 'PEER':
+            stats = c.get('STATS', {})
+            view.update({
+                'RADIO_ID':    int_id(c['RADIO_ID']),
+                'CALLSIGN':     s(c['CALLSIGN']),
+                'LOCATION':     s(c['LOCATION']),
+                'MASTER_IP':    c['MASTER_IP'],
+                'MASTER_PORT':  c['MASTER_PORT'],
+                'SLOTS':        s(c['SLOTS']),
+                'STATS': {
+                    'CONNECTION': stats.get('CONNECTION', ''),
+                    'CONNECTED':  stats.get('CONNECTED', 0),
+                    'PINGS_SENT': stats.get('PINGS_SENT', 0),
+                    'PINGS_ACKD': stats.get('PINGS_ACKD', 0),
+                },
+            })
+        elif mode == 'OPENBRIDGE':
+            view.update({
+                'NETWORK_ID':  int_id(c['NETWORK_ID']),
+                'TARGET_IP':   c['TARGET_IP'],
+                'TARGET_PORT': c['TARGET_PORT'],
+            })
+        out[name] = view
+    return out
+
+
+# Manages the set of connected reporting clients. Doubles as the asyncio protocol
+# factory (it is callable) passed to loop.create_server().
 class reportFactory:
     def __init__(self, config):
         self._config = config
@@ -779,13 +813,23 @@ class reportFactory:
         self._server = await loop.create_server(self, None, port)
         logger.info('(REPORT) HBlink reporting server listening on port %s', port)
 
-    def send_clients(self, _message):
+    def send_clients(self, _obj):
+        line = (json.dumps(_obj) + '\n').encode('utf-8')
         for client in self.clients:
-            client.send_string(_message)
+            client.send_raw(line)
+
+    def send_to(self, _client, _obj):
+        _client.send_raw((json.dumps(_obj) + '\n').encode('utf-8'))
+
+    def config_event(self):
+        return {'type': 'config', 'systems': json_systems(self._config['SYSTEMS'])}
 
     def send_config(self):
-        serialized = pickle.dumps(self._config['SYSTEMS'], protocol=2) #.decode('utf-8', errors='ignore') #pickle.HIGHEST_PROTOCOL)
-        self.send_clients(b''.join([REPORT_OPCODES['CONFIG_SND'], serialized]))
+        self.send_clients(self.config_event())
+
+    # Sent to a single client immediately after it connects so it has full state.
+    def send_initial(self, _client):
+        self.send_to(_client, self.config_event())
 
 
 # ID ALIAS CREATION

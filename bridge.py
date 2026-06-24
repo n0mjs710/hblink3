@@ -44,10 +44,6 @@ from dmr_utils3 import decode, bptc, const
 import config
 import log
 from const import *
-
-# Stuff for socket reporting
-import pickle
-# REMOVE LATER from datetime import datetime
 # The module needs logging, but handlers, etc. are controlled by the parent
 import logging
 logger = logging.getLogger(__name__)
@@ -209,9 +205,9 @@ def rule_timer_loop():
 
     logger.debug('Removed unit(s) %s from UNIT_MAP', remove_list)
 
-
-    if CONFIG['REPORTS']['REPORT']:
-        report_server.send_clients(b'bridge updated')
+    # Push refreshed bridge state to consumers after a rule-timer pass
+    if CONFIG['REPORTS']['REPORT'] and report_server:
+        report_server.send_bridge()
 
 
 # run this every 10 seconds to trim orphaned stream ids
@@ -850,18 +846,63 @@ class routerHBP(HBSYSTEM):
             logger.error('Unknown call type recieved -- not processed')
 
 #
-# Socket-based reporting section
+# Socket-based reporting section (newline-delimited JSON; see hblink.reportFactory)
 #
+
+# Build a JSON-serializable view of the BRIDGES (conference bridge) structure.
+def json_bridges(_bridges):
+    out = {}
+    for bridge, members in _bridges.items():
+        out[bridge] = [{
+            'SYSTEM':  m['SYSTEM'],
+            'TS':      m['TS'],
+            'TGID':    int_id(m['TGID']),
+            'ACTIVE':  m['ACTIVE'],
+            'TO_TYPE': m['TO_TYPE'],
+            'TIMER':   m['TIMER'],
+            'TIMEOUT': m['TIMEOUT'],
+            'ON':      [int_id(t) for t in m['ON']],
+            'OFF':     [int_id(t) for t in m['OFF']],
+        } for m in members]
+    return out
+
+
 class bridgeReportFactory(reportFactory):
 
     def send_bridge(self):
-        serialized = pickle.dumps(BRIDGES, protocol=2) #.decode("utf-8", errors='ignore')
-        self.send_clients(REPORT_OPCODES['BRIDGE_SND']+serialized)
+        self.send_clients({'type': 'bridges', 'bridges': json_bridges(BRIDGES)})
+
+    def send_initial(self, _client):
+        # A new consumer gets both the systems config and the bridge state.
+        self.send_to(_client, self.config_event())
+        self.send_to(_client, {'type': 'bridges', 'bridges': json_bridges(BRIDGES)})
 
     def send_bridgeEvent(self, _data):
-        if isinstance(_data, str):
-            _data = _data.encode('utf-8', errors='ignore')
-        self.send_clients(REPORT_OPCODES['BRDG_EVENT']+_data)
+        # Call sites pass a CSV string (kept to avoid churning the routing code);
+        # convert it to a JSON stream event. CSV fields are:
+        #   call_type, action, trx, system, stream_id, peer, src, slot, dst[, duration]
+        if isinstance(_data, (bytes, bytearray)):
+            _data = _data.decode('utf-8', errors='ignore')
+        p = _data.split(',')
+        try:
+            event = {
+                'type':      'stream',
+                'call_type': p[0],
+                'action':    p[1],
+                'trx':       p[2],
+                'system':    p[3],
+                'stream_id': int(p[4]),
+                'peer':      int(p[5]),
+                'src':       int(p[6]),
+                'slot':      int(p[7]),
+                'dst':       int(p[8]),
+            }
+            if len(p) > 9:
+                event['duration'] = float(p[9])
+        except (IndexError, ValueError):
+            logger.error('(REPORT) malformed bridge event: %s', _data)
+            return
+        self.send_clients(event)
 
 
 #************************************************

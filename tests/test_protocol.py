@@ -7,6 +7,7 @@
 #
 # Run from the repo root:   venv/bin/python -m unittest discover -s tests
 
+import json
 import logging
 import os
 import sys
@@ -99,11 +100,11 @@ class TestMasterHandshake(unittest.TestCase):
         self.assertEqual(m.transport.sent[-1][0][:6], MSTNAK)
 
 
-class TestReportingNetstrings(unittest.TestCase):
-    def _client(self):
+class TestReportingNDJSON(unittest.TestCase):
+    def _client(self, peer=('127.0.0.1', 51000)):
         factory = hblink.reportFactory(CFG)
         proto = factory()                      # factory is callable -> report instance
-        proto.connection_made(MockStreamTransport(('127.0.0.1', 51000)))
+        proto.connection_made(MockStreamTransport(peer))
         return factory, proto
 
     def test_disallowed_client_is_closed(self):
@@ -114,25 +115,51 @@ class TestReportingNetstrings(unittest.TestCase):
         self.assertTrue(t.closed)
         self.assertNotIn(proto, factory.clients)
 
-    def test_send_string_frames_as_netstring(self):
+    def test_connect_pushes_config_snapshot(self):
         _, proto = self._client()
-        proto.send_string(b'\x07hello')
-        self.assertEqual(bytes(proto.transport.written), b'6:\x07hello,')
+        first = bytes(proto.transport.written).split(b'\n')[0]
+        evt = json.loads(first)
+        self.assertEqual(evt['type'], 'config')
+        self.assertIn('MASTER-1', evt['systems'])
+        self.assertEqual(evt['systems']['OBP-1']['MODE'], 'OPENBRIDGE')
 
-    def test_config_req_triggers_config_push(self):
+    def test_send_clients_emits_one_json_line(self):
         factory, proto = self._client()
-        # A CONFIG_REQ opcode wrapped as a netstring, split across two reads
-        from reporting_const import REPORT_OPCODES
-        msg = REPORT_OPCODES['CONFIG_REQ']
-        framed = str(len(msg)).encode() + b':' + msg + b','
-        proto.data_received(framed[:1])
-        proto.data_received(framed[1:])
-        # The server should have pushed a CONFIG_SND netstring back to the client
-        self.assertTrue(proto.transport.written)
-        # First framed message back starts with "<len>:" then the CONFIG_SND opcode
-        body = proto.transport.written
-        colon = body.index(b':')
-        self.assertEqual(body[colon + 1:colon + 2], REPORT_OPCODES['CONFIG_SND'])
+        proto.transport.written.clear()
+        factory.send_clients({'type': 'ping', 'n': 1})
+        data = bytes(proto.transport.written)
+        self.assertTrue(data.endswith(b'\n'))
+        self.assertEqual(json.loads(data), {'type': 'ping', 'n': 1})
+
+    def test_json_systems_omits_secrets(self):
+        view = hblink.json_systems(CFG['SYSTEMS'])
+        for sysview in view.values():
+            self.assertNotIn('PASSPHRASE', sysview)
+            self.assertNotIn('SUB_ACL', sysview)
+
+
+class TestBridgeStreamEvents(unittest.TestCase):
+    def _factory(self):
+        import bridge
+        f = bridge.bridgeReportFactory(CFG)
+        captured = []
+        f.send_clients = captured.append
+        return f, captured
+
+    def test_start_csv_becomes_json(self):
+        f, cap = self._factory()
+        f.send_bridgeEvent(b'GROUP VOICE,START,RX,MASTER-1,123,312000,3120001,1,3100')
+        self.assertEqual(cap[0], {
+            'type': 'stream', 'call_type': 'GROUP VOICE', 'action': 'START',
+            'trx': 'RX', 'system': 'MASTER-1', 'stream_id': 123, 'peer': 312000,
+            'src': 3120001, 'slot': 1, 'dst': 3100})
+
+    def test_end_csv_includes_duration(self):
+        f, cap = self._factory()
+        f.send_bridgeEvent('GROUP VOICE,END,TX,MASTER-1,123,312000,3120001,2,3100,4.20')
+        self.assertEqual(cap[0]['action'], 'END')
+        self.assertEqual(cap[0]['slot'], 2)
+        self.assertEqual(cap[0]['duration'], 4.20)
 
 
 class TestTransportSend(unittest.TestCase):
