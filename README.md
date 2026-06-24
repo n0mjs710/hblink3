@@ -1,30 +1,63 @@
-## PROJECT: Open Source HomeBrew Repeater Proctol Client/Master. ##
+# HBlink3
 
-**UPDATES:**
+HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol (HBP)** in Python 3. It acts as an HBP master and/or peer and routes calls between MMDVM-based DMR systems, working as a **transit / conference-bridge router** — traffic is selectively routed from ingress systems to egress systems according to a rules file. It can also link to **Brandmeister** and **DMR+ (IPSC2)** via **OpenBridge**.
 
-No longer updated. This project is depreciated. HBlink4 is the current version that is in active development
+> **Which HBlink?** HBlink3 is system-oriented and built for **transit routing and conference bridging** between networks. Its companion, **HBlink4** (by the same author), is a repeater-oriented **endpoint server** for running a single regional network. Pick the one that matches your role.
 
-**PURPOSE:** Thanks to the work of Jonathan Naylor, G4KLX; Hans Barthen, DL5DI; Torsten Shultze, DG1HT we have an open protocol for internetworking DMR repeaters. Unfortunately, there's no generic client and/or master stacks. This project is to build an open-source, python-based implementation. You are free to use this software however you want, however we ask that you provide attribution in some public venue (such as project, club, organization web site). This helps us see where the software is in use and track how it is used.
+## Applications
 
-For those who will ask: This is a piece of software that implements an open-source, amateur radio networking protocol. It is not a network. It is not intended to be a network. It is not intended to replace or circumvent a network. People do those things, code doesn't.
-  
-**PROPERTY:**  
-This work represents the author's interpretation of the HomeBrew Repeater Protocol, based on the 2015-07-26 documents from DMRplus, "IPSC Protocol Specs for homebrew DMR repeater" as written by Jonathan Naylor, G4KLX; Hans Barthen, DL5DI; Torsten Shultze, DG1HT, also licenced under Creative Commons BY-NC-SA license.
+| Program | Purpose |
+|---|---|
+| `bridge.py` | The main application: a configurable conference-bridge call router with dynamic on/off triggering, timeouts, and private (unit) call routing. |
+| `bridge_all.py` | A simple proxy that forwards all traffic between every configured system — makes several repeaters appear as one. |
+| `hblink.py` | The protocol core. Runs standalone as a master/peer for testing, and is the module the applications are built on. |
 
-**WARRANTY**
-None. The owners of this work make absolutely no warranty, express or implied. Use this software at your own risk.
+## Features
 
-**PRE-REQUISITE KNOWLEDGE:**  
-This document assumes the reader is familiar with Linux/UNIX, the Python programming language and DMR.  
+- HBP **master** and **peer** modes for MMDVM repeaters and hotspots
+- **OpenBridge** connectivity to Brandmeister / DMR+ (IPSC2)
+- Rules-based **conference-bridge routing** with dynamic ON/OFF/RESET talkgroup triggers and timeouts
+- **Private (unit) call** routing using a learned subscriber-to-system map
+- Layered **access control lists** — registration, subscriber, and per-timeslot talkgroup
+- TCP **reporting feed** for external dashboards
+- Built on Python **`asyncio`** — no external networking framework
 
-**MORE DOCUMENTATION TO COME**
+## Quick start
 
-***0x49 DE N0MJS***
+```bash
+git clone https://github.com/n0mjs710/hblink3.git
+cd hblink3
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp hblink-SAMPLE.cfg hblink.cfg      # edit for your systems
+cp rules_SAMPLE.py  rules.py         # edit your bridges (bridge.py only)
+python bridge.py -c hblink.cfg -r rules.py
+```
 
-Copyright (C) 2016-2020 Cortney T. Buffington, N0MJS n0mjs@me.com
+See **[INSTALL.md](INSTALL.md)** for full setup, configuration, and running as a systemd service.
 
-This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version.
+## Configuration
 
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+- **`hblink.cfg`** — global settings, reporting, logging, alias downloads, and one stanza per system (`MASTER`, `PEER`, or `OPENBRIDGE`). Start from `hblink-SAMPLE.cfg`.
+- **`rules.py`** — (`bridge.py` only) defines the conference bridges, the systems/talkgroups/timeslots that belong to each, and the systems permitted to pass unit calls. Start from `rules_SAMPLE.py`.
 
-You should have received a copy of the GNU General Public License along with this program; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+Your `hblink.cfg` and `rules.py` are git-ignored, so `git pull` won't overwrite them.
+
+## Requirements
+
+- Python **3.8+** (Linux recommended)
+- `bitarray`, `dmr_utils3` — see `requirements.txt`
+
+## License
+
+Copyright (C) 2016-2026 Cortney T. Buffington, N0MJS — n0mjs@me.com
+
+Licensed under the **GNU GPLv3**; see [LICENSE.txt](LICENSE.txt). You may use this software freely, but please credit the project somewhere public (club, organization, or project site) so we can see where it's in use.
+
+## Support & contributing
+
+Maintained by one person with limited resources. Genuine bug reports are welcome; please don't open issues for configuration help or feature requests. Discuss new features first and submit pull requests on a feature branch.
+
+## Acknowledgments
+
+The HomeBrew Repeater Protocol is the work of Jonathan Naylor (G4KLX), Hans Barthen (DL5DI), and Torsten Schultze (DG1HT). This project is the author's clean-room interpretation of that protocol.
