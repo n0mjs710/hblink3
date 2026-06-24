@@ -43,6 +43,13 @@ See **[INSTALL.md](INSTALL.md)** for full setup, configuration, and running as a
 
 Your `hblink.cfg` and `rules.py` are git-ignored, so `git pull` won't overwrite them.
 
+## Dashboard
+
+A real-time web dashboard lives in [`dashboard/`](dashboard/) — a separate program
+with a modern dark UI showing master/peer/OpenBridge systems, conference-bridge
+state, and a live call log. Enable HBlink3's reporting feed (`[REPORTS]` in
+`hblink.cfg`) and see [dashboard/README.md](dashboard/README.md) to run it.
+
 ## Requirements
 
 - Python **3.8+** (Linux recommended)

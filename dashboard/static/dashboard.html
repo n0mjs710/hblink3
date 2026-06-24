@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{REPORT_NAME}} — HBlink3</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#172033; --border:#334155;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
+    --green:#16a34a; --green-bg:#16351f; --red:#dc2626; --red-bg:#3a1620;
+    --orange:#ea580c; --orange-bg:#3a2412;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);padding:14px;font-size:13px}
+  .wrap{max-width:1600px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+  h1{color:var(--accent);font-size:24px;font-weight:600}
+  h1 small{color:var(--muted);font-size:14px;font-weight:400;margin-left:8px}
+  .badge{padding:6px 14px;border-radius:6px;font-weight:600;font-size:13px;border:1px solid var(--border)}
+  .badge.up{background:var(--green-bg);color:#4ade80;border-color:var(--green)}
+  .badge.down{background:var(--red-bg);color:#f87171;border-color:var(--red)}
+  section{margin-bottom:22px}
+  h2{font-size:15px;color:var(--accent);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px}
+  h3{font-size:13px;color:var(--muted);margin:12px 0 6px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:8px;overflow:hidden;margin-bottom:12px}
+  th{background:var(--panel2);color:var(--muted);text-align:left;padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+  td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .sub{color:var(--muted);font-size:11px}
+  .mono{font-variant-numeric:tabular-nums}
+  .sysname{font-weight:600;color:var(--accent)}
+  .pill{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;border:1px solid var(--border);color:var(--muted)}
+  .call{border-radius:5px;padding:5px 8px;min-height:30px}
+  .call.idle{color:#475569;background:var(--panel2)}
+  .call.rx{background:var(--green-bg);color:#86efac;border:1px solid var(--green)}
+  .call.tx{background:var(--orange-bg);color:#fdba74;border:1px solid var(--orange)}
+  .call.hear{background:var(--red-bg);color:#fca5a5;border:1px solid var(--red)}
+  .call b{color:var(--text)}
+  .status-ok{color:#4ade80;font-weight:600}
+  .status-bad{color:#f87171;font-weight:600}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .dot.ok{background:#22c55e}.dot.bad{background:#ef4444}
+  .empty{color:var(--muted);padding:10px;background:var(--panel);border-radius:8px;text-align:center}
+  #log{background:#0b1220;border:1px solid var(--border);border-radius:8px;height:230px;overflow-y:auto;padding:8px 10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5}
+  #log .start{color:#7dd3fc}#log .end{color:#86efac}#log .ts{color:#64748b}
+  .slotcol{width:230px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>{{REPORT_NAME}}<small>HBlink3 Monitor</small></h1>
+    <div id="conn" class="badge down">HBlink: connecting…</div>
+  </header>
+
+  <section><h2>Master Systems</h2><div id="masters"></div></section>
+  <section><h2>Peer Systems</h2><div id="peers"></div></section>
+  <section><h2>OpenBridge Systems</h2><div id="openbridges"></div></section>
+  <section><h2>Conference Bridges</h2><div id="bridges"></div></section>
+  <section><h2>Call Log</h2><div id="log"></div></section>
+</div>
+
+<script>
+const ST = { systems:{}, bridges:{}, active:{}, log:[], hblink:false };
+
+// ---------- helpers ----------
+const el = id => document.getElementById(id);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function dur(secs){
+  secs=Math.max(0,Math.floor(secs));
+  const d=Math.floor(secs/86400), h=Math.floor(secs%86400/3600), m=Math.floor(secs%3600/60), s=secs%60;
+  if(d) return d+'d '+h+'h'; if(h) return h+'h '+m+'m'; if(m) return m+'m '+s+'s'; return s+'s';
+}
+const skey = e => e.system+'|'+e.slot+'|'+e.stream_id;
+const idName = (name,id)=> name ? esc(name)+' <span class="sub mono">('+id+')</span>' : '<span class="mono">'+id+'</span>';
+const callShort = ct => ct==='GROUP VOICE'?'Group':ct==='UNIT VOICE'?'Unit':esc(ct);
+
+// active call(s) for a system, by slot (most recent wins)
+function activeBySlot(sys){ const r={1:null,2:null}; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) r[e.slot]=e;} return r; }
+function activeList(sys){ const a=[]; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) a.push(e);} return a; }
+
+function callCell(e, klass){
+  if(!e) return '<div class="call idle">— idle —</div>';
+  const d='<span class="js-dur" data-start="'+e._arrived+'">'+dur((Date.now()-e._arrived)/1000)+'</span>';
+  return '<div class="call '+klass+'">'+callShort(e.call_type)+' · '+idName(e.src_alias,e.src)+
+         ' → '+idName(e.dst_alias,e.dst)+' <span class="sub">['+d+']</span></div>';
+}
+
+// ---------- renderers ----------
+function renderMasters(){
+  const names = Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='MASTER');
+  if(!names.length){ el('masters').innerHTML='<div class="empty">No master systems</div>'; return; }
+  let h='';
+  for(const n of names){
+    const m=ST.systems[n], peers=m.PEERS||{}, act=activeBySlot(n);
+    const pids=Object.keys(peers);
+    h+='<h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' peer(s)</span></h3>';
+    h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>CC / Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+    if(!pids.length) h+='<tr><td colspan="6" class="sub">No peers connected</td></tr>';
+    for(const pid of pids){
+      const p=peers[pid];
+      const cell=(slot)=>{ const e=act[slot]; if(!e) return callCell(null);
+        return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'hear'); };
+      const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
+      h+='<tr><td class="sysname">'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
+         '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+
+         '<td class="mono sub">'+freq+'</td><td class="mono">CC '+esc(p.COLORCODE)+'<div class="sub">slots '+esc(p.SLOTS)+'</div></td>'+
+         '<td>'+cell(1)+'</td><td>'+cell(2)+'</td></tr>';
+    }
+    h+='</table>';
+  }
+  el('masters').innerHTML=h;
+}
+function fmtFreq(f){ return f && f.length>=7 ? (f.slice(0,3)+'.'+f.slice(3,7)) : esc(f); }
+
+function renderPeers(){
+  const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='PEER');
+  if(!names.length){ el('peers').innerHTML='<div class="empty">No peer systems</div>'; return; }
+  let h='<table><tr><th>System</th><th>Identity</th><th>Connection</th><th>Pings S/A/L</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+  for(const n of names){
+    const s=ST.systems[n], st=s.STATS||{}, act=activeBySlot(n);
+    const up = st.CONNECTION==='YES';
+    const pings = (st.PINGS_SENT||0)+' / '+(st.PINGS_ACKD||0)+' / '+((st.PINGS_SENT||0)-(st.PINGS_ACKD||0));
+    const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
+    h+='<tr><td class="sysname">'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
+       '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · master '+esc(s.MASTER_IP)+':'+esc(s.MASTER_PORT)+'</div></td>'+
+       '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+esc(st.CONNECTION||'NO')+'</span><div class="sub">up '+since+'</div></td>'+
+       '<td class="mono sub">'+pings+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
+  }
+  el('peers').innerHTML=h+'</table>';
+}
+
+function renderOpenbridges(){
+  const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='OPENBRIDGE');
+  if(!names.length){ el('openbridges').innerHTML='<div class="empty">No OpenBridge systems</div>'; return; }
+  let h='<table><tr><th>System</th><th>Network / Target</th><th>Active Streams</th></tr>';
+  for(const n of names){
+    const o=ST.systems[n], streams=activeList(n);
+    const cells = streams.length ? streams.map(e=>'<span class="call '+(e.trx==='TX'?'tx':'rx')+'" style="display:inline-block;margin:2px">'+e.trx+' · '+idName(e.src_alias,e.src)+' → '+idName(e.dst_alias,e.dst)+'</span>').join(' ') : '<span class="call idle" style="display:inline-block">— idle —</span>';
+    h+='<tr><td class="sysname">'+esc(n)+'</td><td class="mono">ID '+esc(o.NETWORK_ID)+'<div class="sub">'+esc(o.TARGET_IP)+':'+esc(o.TARGET_PORT)+'</div></td><td>'+cells+'</td></tr>';
+  }
+  el('openbridges').innerHTML=h+'</table>';
+}
+
+function renderBridges(){
+  const names=Object.keys(ST.bridges);
+  if(!names.length){ el('bridges').innerHTML='<div class="empty">No conference bridges (or running bridge_all / hblink standalone)</div>'; return; }
+  let h='';
+  for(const b of names){
+    h+='<h3>'+esc(b)+'</h3><table><tr><th>System</th><th>TS</th><th>TGID</th><th>Status</th><th>Timeout</th><th>Action</th><th>Connect TGIDs</th><th>Disconnect TGIDs</th></tr>';
+    for(const m of ST.bridges[b]){
+      const on=m.ACTIVE;
+      const to = m.TO_TYPE==='ON'||m.TO_TYPE==='OFF';
+      const rem = to ? '<span class="js-countdown mono" data-rem="'+(m.remaining==null?0:m.remaining)+'" data-arr="'+Date.now()+'">'+(m.remaining<=0?'expired':dur(m.remaining))+'</span>' : '<span class="sub">N/A</span>';
+      const act = m.TO_TYPE==='ON'?'Disconnect':m.TO_TYPE==='OFF'?'Connect':'<span class="sub">None</span>';
+      h+='<tr><td class="sysname">'+esc(m.SYSTEM)+'</td><td class="mono">'+m.TS+'</td><td>'+idName(m.TGID_NAME,m.TGID)+'</td>'+
+         '<td><span class="'+(on?'status-ok':'status-bad')+'">'+(on?'Connected':'Disconnected')+'</span></td>'+
+         '<td>'+rem+'</td><td>'+act+'</td><td class="mono sub">'+(m.ON||[]).join(', ')+'</td><td class="mono sub">'+(m.OFF||[]).join(', ')+'</td></tr>';
+    }
+    h+='</table>';
+  }
+  el('bridges').innerHTML=h;
+}
+
+function logRow(e){
+  const t=new Date(e._arrived||Date.now()).toLocaleTimeString();
+  const cls=e.action==='START'?'start':'end';
+  const d=e.duration!=null?(' · '+e.duration.toFixed(1)+'s'):'';
+  return '<div><span class="ts">'+t+'</span> <span class="'+cls+'">'+callShort(e.call_type)+' '+e.action+'</span> · '+
+         esc(e.system)+' · '+idName(e.src_alias,e.src)+' TS'+e.slot+' → '+idName(e.dst_alias,e.dst)+d+'</div>';
+}
+function renderLog(){ el('log').innerHTML = ST.log.map(logRow).join(''); }
+
+// ---------- live tick ----------
+setInterval(()=>{
+  const now=Date.now();
+  document.querySelectorAll('.js-since').forEach(s=>{ s.textContent=dur((+s.dataset.base)+(now-(+s.dataset.arr))/1000); });
+  document.querySelectorAll('.js-dur').forEach(s=>{ s.textContent=dur((now-(+s.dataset.start))/1000); });
+  document.querySelectorAll('.js-countdown').forEach(s=>{ const r=(+s.dataset.rem)-(now-(+s.dataset.arr))/1000; s.textContent=r<=0?'expired':dur(r); });
+},1000);
+
+// ---------- websocket ----------
+function setConn(up){ ST.hblink=up; const c=el('conn'); c.className='badge '+(up?'up':'down'); c.textContent='HBlink: '+(up?'connected':'disconnected'); }
+function renderAll(){ renderMasters(); renderPeers(); renderOpenbridges(); renderBridges(); renderLog(); }
+
+function applyStream(e){
+  e._arrived = e._arrived || Date.now();
+  if(e.action==='START') ST.active[skey(e)]=e; else delete ST.active[skey(e)];
+  if(e.trx==='RX'){ ST.log.unshift(e); if(ST.log.length>400) ST.log.pop(); renderLog(); }
+  // re-render the affected system class
+  const sys=ST.systems[e.system];
+  if(sys&&sys.MODE==='MASTER') renderMasters();
+  else if(sys&&sys.MODE==='PEER') renderPeers();
+  else if(sys&&sys.MODE==='OPENBRIDGE') renderOpenbridges();
+  else renderMasters();
+}
+
+let sock=null;
+function connect(){
+  sock=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  sock.onmessage=ev=>{
+    const m=JSON.parse(ev.data);
+    if(m.type==='initial'){ setConn(m.hblink); ST.systems=m.systems||{}; ST.bridges=m.bridges||{};
+      ST.active={}; (m.streams||[]).forEach(s=>{s._arrived=Date.now(); ST.active[skey(s)]=s;});
+      ST.log=(m.log||[]).map(e=>{e._arrived=e._arrived||Date.now();return e;}); renderAll(); }
+    else if(m.type==='hblink'){ setConn(m.connected); if(!m.connected){ST.systems={};ST.bridges={};ST.active={};renderAll();} }
+    else if(m.type==='config'){ ST.systems=m.systems||{}; renderMasters(); renderPeers(); renderOpenbridges(); }
+    else if(m.type==='bridges'){ ST.bridges=m.bridges||{}; renderBridges(); }
+    else if(m.type==='stream'){ applyStream(m); }
+  };
+  sock.onclose=()=>{ setConn(false); el('conn').textContent='HBlink: dashboard offline'; setTimeout(connect,2000); };
+}
+connect();
+</script>
+</body>
+</html>

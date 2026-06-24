@@ -1,0 +1,35 @@
+# systemd unit for the HBlink3 dashboard (dashboard/server.py).
+#
+# Install:
+#   sudo cp hblink3-dash.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hblink3-dash
+#
+# Adjust User/Group and the paths below to your install. The dashboard reads
+# dashboard/config.py for its settings (copy it from dashboard/config_sample.py).
+
+[Unit]
+Description=HBlink3 Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cort
+Group=cort
+WorkingDirectory=/home/cort/hblink3/dashboard
+ExecStart=/home/cort/hblink3/venv/bin/python /home/cort/hblink3/dashboard/server.py
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging to the journal (journalctl -u hblink3-dash)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hblink3-dash
+
+[Install]
+WantedBy=multi-user.target

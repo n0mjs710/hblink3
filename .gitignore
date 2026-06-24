@@ -98,3 +98,7 @@ local_subscriber_ids.*
 peer_ids.*
 local_peer_ids.*
 talkgroup_ids.*
+
+# Dashboard local config (copy from dashboard/config_sample.py)
+dashboard/config.py
+dashboard/__pycache__/

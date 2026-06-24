@@ -1,0 +1,232 @@
+#!/usr/bin/env python
+#
+###############################################################################
+#   Copyright (C) 2016-2026  Cortney T. Buffington, N0MJS <n0mjs@me.com>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or
+#   (at your option) any later version.
+###############################################################################
+
+'''
+HBlink3 dashboard backend.
+
+Connects to HBlink3's NDJSON reporting feed (one JSON object per line), keeps the
+authoritative display state, and serves a single-page UI that receives live JSON
+deltas over a WebSocket. Run: python server.py  (or via run_dashboard.py).
+'''
+
+import asyncio
+import json
+import logging
+import os
+import sys
+import time
+from collections import deque
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+import uvicorn
+
+from dmr_utils3.utils import mk_id_dict, get_alias
+
+# Ensure THIS directory's config.py wins over HBlink3's top-level config.py.
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATIC = os.path.join(HERE, 'static')
+sys.path.insert(0, HERE)
+
+# ---- configuration -----------------------------------------------------------
+try:
+    from config import (REPORT_NAME, HBLINK_IP, HBLINK_PORT, WEB_HOST, WEB_PORT,
+                         LOG_LINES, PATH, PEER_FILE, SUBSCRIBER_FILE, TGID_FILE,
+                         LOCAL_SUB_FILE, LOCAL_PEER_FILE)
+except ImportError:
+    sys.exit('No config.py found -- copy config_sample.py to config.py and edit it.')
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger('hbdash')
+
+
+# ---- alias resolution --------------------------------------------------------
+def _abs(p):
+    return p if os.path.isabs(p) else os.path.join(HERE, p)
+
+def load_aliases():
+    base = _abs(PATH)
+    peer_ids = mk_id_dict(base, PEER_FILE)
+    subscriber_ids = mk_id_dict(base, SUBSCRIBER_FILE)
+    talkgroup_ids = mk_id_dict(base, TGID_FILE)
+    if LOCAL_PEER_FILE:
+        peer_ids.update(mk_id_dict(base, LOCAL_PEER_FILE))
+    if LOCAL_SUB_FILE:
+        subscriber_ids.update(mk_id_dict(base, LOCAL_SUB_FILE))
+    logger.info('aliases loaded: %d peers, %d subscribers, %d talkgroups',
+                len(peer_ids), len(subscriber_ids), len(talkgroup_ids))
+    return peer_ids, subscriber_ids, talkgroup_ids
+
+PEER_IDS, SUBSCRIBER_IDS, TALKGROUP_IDS = load_aliases()
+
+def alias(_id, _dict):
+    a = get_alias(_id, _dict)
+    return None if a == _id else a
+
+
+# ---- shared state ------------------------------------------------------------
+class State:
+    def __init__(self):
+        self.systems = {}                 # last 'config' event payload
+        self.bridges = {}                 # last 'bridges' event payload (enriched)
+        self.streams = {}                 # key -> last START stream event (active calls)
+        self.log = deque(maxlen=LOG_LINES)
+        self.hblink = False
+        self.clients = set()              # connected dashboard WebSockets
+
+STATE = State()
+
+
+def stream_key(evt):
+    return '{}|{}|{}'.format(evt['system'], evt['slot'], evt['stream_id'])
+
+def enrich_stream(evt):
+    evt['src_alias'] = alias(evt['src'], SUBSCRIBER_IDS)
+    evt['peer_alias'] = alias(evt['peer'], PEER_IDS)
+    evt['dst_alias'] = alias(evt['dst'], TALKGROUP_IDS)
+    return evt
+
+# Convert server-side absolute epochs to "seconds since/until" deltas so the
+# browser can tick live counters without depending on the client's clock.
+def enrich_config(systems):
+    now = time.time()
+    for sysview in systems.values():
+        if sysview['MODE'] == 'MASTER':
+            for p in sysview.get('PEERS', {}).values():
+                p['connected_secs'] = int(max(0, now - p.get('CONNECTED', now)))
+        elif sysview['MODE'] == 'PEER':
+            c = sysview.get('STATS', {}).get('CONNECTED')
+            sysview['STATS']['connected_secs'] = int(max(0, now - c)) if c else None
+    return systems
+
+def enrich_bridges(bridges):
+    now = time.time()
+    for members in bridges.values():
+        for m in members:
+            m['TGID_NAME'] = alias(m['TGID'], TALKGROUP_IDS)
+            if m['TO_TYPE'] in ('ON', 'OFF'):
+                m['remaining'] = int(m['TIMER'] - now)
+            else:
+                m['remaining'] = None
+    return bridges
+
+
+async def broadcast(obj):
+    dead = set()
+    for ws in STATE.clients:
+        try:
+            await ws.send_json(obj)
+        except Exception:
+            dead.add(ws)
+    STATE.clients -= dead
+
+
+async def handle_event(evt):
+    t = evt.get('type')
+    if t == 'config':
+        STATE.systems = enrich_config(evt['systems'])
+        await broadcast({'type': 'config', 'systems': STATE.systems})
+    elif t == 'bridges':
+        STATE.bridges = enrich_bridges(evt['bridges'])
+        await broadcast({'type': 'bridges', 'bridges': STATE.bridges})
+    elif t == 'stream':
+        enrich_stream(evt)
+        key = stream_key(evt)
+        if evt['action'] == 'START':
+            STATE.streams[key] = evt
+        else:
+            STATE.streams.pop(key, None)
+        # Log ingress (RX) legs only, matching the original monitor's behavior.
+        if evt['trx'] == 'RX':
+            STATE.log.appendleft(evt)
+        await broadcast(evt)
+    else:
+        logger.debug('ignoring unknown event type: %s', t)
+
+
+# ---- HBlink3 feed client (with reconnect) ------------------------------------
+async def hblink_feed():
+    while True:
+        try:
+            reader, writer = await asyncio.open_connection(HBLINK_IP, HBLINK_PORT)
+            logger.info('connected to HBlink3 feed at %s:%s', HBLINK_IP, HBLINK_PORT)
+            STATE.hblink = True
+            await broadcast({'type': 'hblink', 'connected': True})
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break                                  # connection closed
+                try:
+                    await handle_event(json.loads(line))
+                except json.JSONDecodeError:
+                    logger.warning('bad JSON line from HBlink3: %r', line[:120])
+        except (ConnectionRefusedError, OSError) as e:
+            logger.warning('HBlink3 feed unavailable (%s); retrying', e)
+        finally:
+            if STATE.hblink:
+                STATE.hblink = False
+                STATE.systems = {}
+                STATE.bridges = {}
+                STATE.streams = {}
+                await broadcast({'type': 'hblink', 'connected': False})
+        await asyncio.sleep(3)                              # reconnect delay
+
+
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(hblink_feed())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan=lifespan)
+
+
+# ---- HTTP + WebSocket --------------------------------------------------------
+@app.get('/', response_class=HTMLResponse)
+async def index():
+    with open(os.path.join(STATIC, 'dashboard.html'), encoding='utf-8') as f:
+        html = f.read()
+    return html.replace('{{REPORT_NAME}}', REPORT_NAME)
+
+@app.get('/api/state')
+async def api_state():
+    return JSONResponse(current_state())
+
+def current_state():
+    return {
+        'report_name': REPORT_NAME,
+        'hblink': STATE.hblink,
+        'systems': STATE.systems,
+        'bridges': STATE.bridges,
+        'streams': list(STATE.streams.values()),
+        'log': list(STATE.log),
+    }
+
+@app.websocket('/ws')
+async def ws_endpoint(ws: WebSocket):
+    await ws.accept()
+    STATE.clients.add(ws)
+    try:
+        await ws.send_json({'type': 'initial', **current_state()})
+        while True:
+            await ws.receive_text()                        # ignore; keep the socket open
+    except WebSocketDisconnect:
+        pass
+    finally:
+        STATE.clients.discard(ws)
+
+
+def main():
+    uvicorn.run(app, host=WEB_HOST, port=WEB_PORT, log_level='warning')
+
+if __name__ == '__main__':
+    main()

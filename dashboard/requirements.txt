@@ -1,0 +1,5 @@
+# HBlink3 dashboard dependencies (a separate program from the core).
+# The dashboard uses FastAPI + Uvicorn; the HBlink3 core itself stays stdlib-only.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+dmr_utils3>=0.1.30      # DMR ID -> callsign / talkgroup-name resolution
