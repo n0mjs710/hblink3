@@ -33,6 +33,13 @@ def _full_call(w, src, *, rf_src, dst, peer, slot, stream_id):
     w.feed_group_terminator(src, rf_src=rf_src, dst=dst, peer=peer, slot=slot, stream_id=stream_id)
 
 
+def _full_unit_call(w, src, *, rf_src, dst, peer, slot, stream_id):
+    w.feed_unit_header(src, rf_src=rf_src, dst=dst, peer=peer, slot=slot, stream_id=stream_id)
+    for burst in (1, 2, 3, 4):
+        w.feed_unit_burst(src, burst, rf_src=rf_src, dst=dst, peer=peer, slot=slot, stream_id=stream_id)
+    w.feed_unit_terminator(src, rf_src=rf_src, dst=dst, peer=peer, slot=slot, stream_id=stream_id)
+
+
 def _hex(captures):
     return [[name, pkt.hex()] for (name, pkt) in captures]
 
@@ -128,6 +135,47 @@ def hbp_contention_second_stream_blocked():
     return _hex(w.captures)
 
 
+def unit_hbp_to_hbp():
+    w = harness.World({}, unit_systems=['MASTER-1'], extra_systems=['REPEATER-1'])
+    w.seed_unit_map(bytes_3(2080), 'REPEATER-1')
+    _full_unit_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
+                    peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x21')
+    return _hex(w.captures)
+
+
+def unit_hbp_to_obp():
+    w = harness.World({}, unit_systems=['MASTER-1'], extra_systems=['OBP-1'])
+    w.seed_unit_map(bytes_3(2080), 'OBP-1')
+    _full_unit_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
+                    peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x22')
+    return _hex(w.captures)
+
+
+def unit_hbp_to_obp_ts2():
+    # Unit on TS2 to an OBP (BOTH_SLOTS False) -> slot bit cleared on egress.
+    w = harness.World({}, unit_systems=['MASTER-1'], extra_systems=['OBP-1'])
+    w.seed_unit_map(bytes_3(2080), 'OBP-1')
+    _full_unit_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
+                    peer=bytes_4(312000), slot=2, stream_id=b'\x00\x00\x00\x23')
+    return _hex(w.captures)
+
+
+def unit_obp_to_hbp():
+    w = harness.World({}, unit_systems=[], extra_systems=['OBP-1', 'MASTER-1'])
+    w.seed_unit_map(bytes_3(2080), 'MASTER-1')
+    _full_unit_call(w, 'OBP-1', rf_src=bytes_3(1234), dst=bytes_3(2080),
+                    peer=bytes_4(3129100), slot=1, stream_id=b'\x00\x00\x00\x24')
+    return _hex(w.captures)
+
+
+def unit_obp_to_obp():
+    w = harness.World({}, unit_systems=[], extra_systems=['OBP-1', 'OBP-2'])
+    w.seed_unit_map(bytes_3(2080), 'OBP-2')
+    _full_unit_call(w, 'OBP-1', rf_src=bytes_3(1234), dst=bytes_3(2080),
+                    peer=bytes_4(3129100), slot=1, stream_id=b'\x00\x00\x00\x25')
+    return _hex(w.captures)
+
+
 SCENARIOS = {
     'hbp_to_hbp_same_slot': hbp_to_hbp_same_slot,
     'hbp_to_hbp_cross_slot': hbp_to_hbp_cross_slot,
@@ -139,6 +187,11 @@ SCENARIOS = {
     'obp_to_obp_no_voice_header': obp_to_obp_no_voice_header,
     'hbp_multi_target': hbp_multi_target,
     'hbp_contention_second_stream_blocked': hbp_contention_second_stream_blocked,
+    'unit_hbp_to_hbp': unit_hbp_to_hbp,
+    'unit_hbp_to_obp': unit_hbp_to_obp,
+    'unit_hbp_to_obp_ts2': unit_hbp_to_obp_ts2,
+    'unit_obp_to_hbp': unit_obp_to_hbp,
+    'unit_obp_to_obp': unit_obp_to_obp,
 }
 
 

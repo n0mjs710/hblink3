@@ -75,7 +75,7 @@ class World:
     """A small routing world: a set of systems joined to bridges, with a clock
     and an emission-capture log."""
 
-    def __init__(self, bridges, unit_systems=None):
+    def __init__(self, bridges, unit_systems=None, extra_systems=None):
         # Fresh, isolated module state for the bridge module.
         self.clock = Clock()
         bridge.time = self.clock  # monkeypatch the clock the routers read
@@ -99,7 +99,7 @@ class World:
         # Instantiate the real router objects for every system referenced.
         self.captures = []
         bridge.systems.clear()
-        names = set()
+        names = set(unit_systems or []) | set(extra_systems or [])
         for b in bridges:
             for member in bridges[b]:
                 names.add(member['SYSTEM'])
@@ -144,6 +144,23 @@ class World:
     def feed_group_burst(self, src, burst, **kw):
         self.feed(src, call_type='group', frame_type=_FT_VOICE,
                   dtype_vseq=burst, **kw)
+
+    def feed_unit_header(self, src, **kw):
+        self.feed(src, call_type='unit', frame_type=_FT_DATA_SYNC,
+                  dtype_vseq=_VHEAD, **kw)
+
+    def feed_unit_terminator(self, src, **kw):
+        self.feed(src, call_type='unit', frame_type=_FT_DATA_SYNC,
+                  dtype_vseq=_VTERM, **kw)
+
+    def feed_unit_burst(self, src, burst, **kw):
+        self.feed(src, call_type='unit', frame_type=_FT_VOICE,
+                  dtype_vseq=burst, **kw)
+
+    def seed_unit_map(self, subscriber, system):
+        """Register that `subscriber` (3 bytes) was last heard on `system`, so a
+        unit call to it routes there."""
+        bridge.UNIT_MAP[subscriber] = (system, self.clock())
 
     def drain(self):
         """Return and clear captured emissions as a list of (system, bytes)."""
