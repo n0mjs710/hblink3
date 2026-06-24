@@ -38,11 +38,7 @@ import sys
 from time import time
 from importlib import import_module
 from types import ModuleType
-
-# Twisted is pretty important, so I keep it separate
-from twisted.internet.protocol import Factory, Protocol
-from twisted.protocols.basic import NetstringReceiver
-from twisted.internet import reactor, task
+import asyncio
 
 # Things we import from the main hblink module
 from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, reportFactory, REPORT_OPCODES, config_reports, mk_aliases, acl_check
@@ -261,33 +257,40 @@ if __name__ == '__main__':
     logger.info('\n\nCopyright (c) 2013, 2014, 2015, 2016, 2018, 2019\n\tThe Regents of the K0USY Group. All rights reserved.\n')
     logger.debug('Logging system started, anything from here on gets logged')
 
-    # Set up the signal handler
-    def sig_handler(_signal, _frame):
-        logger.info('SHUTDOWN: BRIDGE_ALL IS TERMINATING WITH SIGNAL %s', str(_signal))
-        hblink_handler(_signal, _frame)
-        logger.info('SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING REACTOR')
-        reactor.stop()
-
-    # Set signal handers so that we can gracefully exit if need be
-    for sig in [signal.SIGTERM, signal.SIGINT]:
-        signal.signal(sig, sig_handler)
-
     # Create the name-number mapping dictionaries
     peer_ids, subscriber_ids, talkgroup_ids = mk_aliases(CONFIG)
 
-    # INITIALIZE THE REPORTING LOOP
-    report_server = config_reports(CONFIG, reportFactory)
+    # The asyncio entry point: signal handling, reporting, and a UDP endpoint for
+    # each enabled system, then wait for shutdown.
+    async def async_main():
+        loop = asyncio.get_running_loop()
+        stop_event = asyncio.Event()
 
-    # HBlink instance creation
-    logger.info('HBlink \'bridge_all.py\' -- SYSTEM STARTING...')
-    for system in CONFIG['SYSTEMS']:
-        if CONFIG['SYSTEMS'][system]['ENABLED']:
-            if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
-                logger.critical('%s FATAL: Instance is mode \'OPENBRIDGE\', \n\t\t...Which would be tragic for Bridge All, since it carries multiple call\n\t\tstreams simultaneously. bridge_all.py onlyl works with MMDVM-based systems', system)
-                sys.exit('bridge_all.py cannot function with systems that are not MMDVM devices. System {} is configured as an OPENBRIDGE'.format(system))
-            else:
-                systems[system] = bridgeallSYSTEM(system, CONFIG, report_server)
-            reactor.listenUDP(CONFIG['SYSTEMS'][system]['PORT'], systems[system], interface=CONFIG['SYSTEMS'][system]['IP'])
-            logger.debug('%s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
+        def shutdown(signum):
+            logger.info('SHUTDOWN: BRIDGE_ALL IS TERMINATING WITH SIGNAL %s', signum)
+            hblink_handler(signum, None)
+            logger.info('SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING')
+            stop_event.set()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, shutdown, sig)
 
-    reactor.run()
+        # INITIALIZE THE REPORTING LOOP
+        report_server = config_reports(CONFIG, reportFactory)
+
+        # HBlink instance creation
+        logger.info('HBlink \'bridge_all.py\' -- SYSTEM STARTING...')
+        for system in CONFIG['SYSTEMS']:
+            if CONFIG['SYSTEMS'][system]['ENABLED']:
+                if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
+                    logger.critical('%s FATAL: Instance is mode \'OPENBRIDGE\', \n\t\t...Which would be tragic for Bridge All, since it carries multiple call\n\t\tstreams simultaneously. bridge_all.py onlyl works with MMDVM-based systems', system)
+                    sys.exit('bridge_all.py cannot function with systems that are not MMDVM devices. System {} is configured as an OPENBRIDGE'.format(system))
+                else:
+                    systems[system] = bridgeallSYSTEM(system, CONFIG, report_server)
+                await loop.create_datagram_endpoint(
+                    lambda s=systems[system]: s,
+                    local_addr=(CONFIG['SYSTEMS'][system]['IP'], CONFIG['SYSTEMS'][system]['PORT']))
+                logger.debug('%s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
+
+        await stop_event.wait()
+
+    asyncio.run(async_main())

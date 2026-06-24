@@ -19,14 +19,14 @@ authors = [
 ]
 keywords = ["dmr", "hbp", "homebrew", "repeater", "amateur-radio", "mmdvm"]
 
-# The code itself runs on 3.8+. Planned bump to >=3.11 alongside the asyncio
-# migration, to use asyncio.TaskGroup / asyncio.timeout for the maintenance and
-# rule-timer loops that are LoopingCall today.
+# The networking core is stdlib asyncio (asyncio.run / create_datagram_endpoint /
+# create_task / Event), all available on 3.8+. A future bump to >=3.11 would let
+# the maintenance/rule-timer loops use asyncio.TaskGroup / asyncio.timeout, but
+# nothing requires it today.
 requires-python = ">=3.8"
 
 dependencies = [
     "bitarray>=2.0.0",
-    "Twisted>=22.10.0",
     "dmr_utils3>=0.1.30",
 ]
 

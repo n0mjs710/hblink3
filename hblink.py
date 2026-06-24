@@ -35,12 +35,8 @@ from hashlib import sha256, sha1
 from hmac import new as hmac_new, compare_digest
 from time import time
 from collections import deque
+import asyncio
 from bisect import bisect_right
-
-# Twisted is pretty important, so I keep it separate
-from twisted.internet.protocol import DatagramProtocol, Factory, Protocol
-from twisted.protocols.basic import NetstringReceiver
-from twisted.internet import reactor, task
 
 # Other files we pull from -- this is mostly for readability and segmentation
 import log
@@ -67,7 +63,22 @@ __email__      = 'n0mjs@me.com'
 # Global variables used whether we are a module or __main__
 systems = {}
 
-# Timed loop used for reporting HBP status
+# Generic periodic-task runner replacing twisted's task.LoopingCall. Runs _func
+# every _interval seconds. Unlike a bare LoopingCall, a raised exception is logged
+# and the loop continues, so a transient error can't silently kill the timer.
+async def run_periodic(_interval, _func, _name, *_args):
+    try:
+        while True:
+            await asyncio.sleep(_interval)
+            try:
+                _func(*_args)
+            except Exception:
+                logger.error('(GLOBAL) Error in periodic task %s', _name, exc_info=True)
+    except asyncio.CancelledError:
+        raise
+
+# Set up the TCP reporting server and its periodic config push. Must be called
+# from within the running asyncio event loop (e.g. from async_main).
 def config_reports(_config, _factory):
     def reporting_loop(_logger, _server):
         _logger.debug('(GLOBAL) Periodic reporting loop started')
@@ -77,10 +88,10 @@ def config_reports(_config, _factory):
 
     report_server = _factory(_config)
     report_server.clients = []
-    reactor.listenTCP(_config['REPORTS']['REPORT_PORT'], report_server)
-
-    reporting = task.LoopingCall(reporting_loop, logger, report_server)
-    reporting.start(_config['REPORTS']['REPORT_INTERVAL'])
+    loop = asyncio.get_event_loop()
+    loop.create_task(report_server.start(_config['REPORTS']['REPORT_PORT']))
+    loop.create_task(run_periodic(_config['REPORTS']['REPORT_INTERVAL'],
+                                  reporting_loop, '(GLOBAL) reporting', logger, report_server))
 
     return report_server
 
@@ -110,7 +121,7 @@ def acl_check(_id, _acl):
 #    OPENBRIDGE CLASS
 #************************************************
 
-class OPENBRIDGE(DatagramProtocol):
+class OPENBRIDGE(asyncio.DatagramProtocol):
     def __init__(self, _name, _config, _report):
         # Define a few shortcuts to make the rest of the class more readable
         self._CONFIG = _config
@@ -118,6 +129,9 @@ class OPENBRIDGE(DatagramProtocol):
         self._report = _report
         self._config = self._CONFIG['SYSTEMS'][self._system]
         self._laststrid = deque([], 20)
+
+    def connection_made(self, transport):
+        self.transport = transport
 
     def dereg(self):
         logger.info('(%s) is mode OPENBRIDGE. No De-Registration required, continuing shutdown', self._system)
@@ -128,7 +142,7 @@ class OPENBRIDGE(DatagramProtocol):
             _packet = b''.join([_packet[:11], self._config['NETWORK_ID'], _packet[15:]])
             #_packet += hmac_new(self._config['PASSPHRASE'],_packet,sha1).digest()
             _packet = b''.join([_packet, (hmac_new(self._config['PASSPHRASE'],_packet,sha1).digest())])
-            self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
+            self.transport.sendto(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
             # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
             # logger.debug('(%s) TX Packet to OpenBridge %s:%s -- %s', self._system, self._config['TARGET_IP'], self._config['TARGET_PORT'], ahex(_packet))
         else:
@@ -138,7 +152,7 @@ class OPENBRIDGE(DatagramProtocol):
         pass
         #print(int_id(_peer_id), int_id(_rf_src), int_id(_dst_id), int_id(_seq), _slot, _call_type, _frame_type, repr(_dtype_vseq), int_id(_stream_id))
 
-    def datagramReceived(self, _packet, _sockaddr):
+    def datagram_received(self, _packet, _sockaddr):
         # Keep This Line Commented Unless HEAVILY Debugging!
         #logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_packet))
 
@@ -205,7 +219,7 @@ class OPENBRIDGE(DatagramProtocol):
 #     HB MASTER CLASS
 #************************************************
 
-class HBSYSTEM(DatagramProtocol):
+class HBSYSTEM(asyncio.DatagramProtocol):
     def __init__(self, _name, _config, _report):
         # Define a few shortcuts to make the rest of the class more readable
         self._CONFIG = _config
@@ -219,20 +233,28 @@ class HBSYSTEM(DatagramProtocol):
             self._peers = self._CONFIG['SYSTEMS'][self._system]['PEERS']
             self.send_system = self.send_peers
             self.maintenance_loop = self.master_maintenance_loop
-            self.datagramReceived = self.master_datagramReceived
+            self.datagram_received = self.master_datagram_received
             self.dereg = self.master_dereg
 
         elif self._config['MODE'] == 'PEER':
             self._stats = self._config['STATS']
             self.send_system = self.send_master
             self.maintenance_loop = self.peer_maintenance_loop
-            self.datagramReceived = self.peer_datagramReceived
+            self.datagram_received = self.peer_datagram_received
             self.dereg = self.peer_dereg
 
-    def startProtocol(self):
+        self._maintenance_task = None
+
+    def connection_made(self, transport):
+        self.transport = transport
         # Set up periodic loop for tracking pings from peers. Run every 'PING_TIME' seconds
-        self._system_maintenance = task.LoopingCall(self.maintenance_loop)
-        self._system_maintenance_loop = self._system_maintenance.start(self._CONFIG['GLOBAL']['PING_TIME'])
+        self._maintenance_task = asyncio.create_task(
+            run_periodic(self._CONFIG['GLOBAL']['PING_TIME'], self.maintenance_loop,
+                         '(%s) maintenance loop' % self._system))
+
+    def connection_lost(self, exc):
+        if self._maintenance_task:
+            self._maintenance_task.cancel()
 
     # Aliased in __init__ to maintenance_loop if system is a master
     def master_maintenance_loop(self):
@@ -277,14 +299,14 @@ class HBSYSTEM(DatagramProtocol):
     def send_peer(self, _peer, _packet):
         if _packet[:4] == DMRD:
             _packet = b''.join([_packet[:11], _peer, _packet[15:]])
-        self.transport.write(_packet, self._peers[_peer]['SOCKADDR'])
+        self.transport.sendto(_packet, self._peers[_peer]['SOCKADDR'])
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
         #logger.debug('(%s) TX Packet to %s on port %s: %s', self._peers[_peer]['RADIO_ID'], self._peers[_peer]['IP'], self._peers[_peer]['PORT'], ahex(_packet))
 
     def send_master(self, _packet):
         if _packet[:4] == DMRD:
             _packet = b''.join([_packet[:11], self._config['RADIO_ID'], _packet[15:]])
-        self.transport.write(_packet, self._config['MASTER_SOCKADDR'])
+        self.transport.sendto(_packet, self._config['MASTER_SOCKADDR'])
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
         # logger.debug('(%s) TX Packet to %s:%s -- %s', self._system, self._config['MASTER_IP'], self._config['MASTER_PORT'], ahex(_packet))
 
@@ -326,8 +348,8 @@ class HBSYSTEM(DatagramProtocol):
         self.send_master(RPTCL + self._config['RADIO_ID'])
         logger.info('(%s) De-Registration sent to Master: %s:%s', self._system, self._config['MASTER_SOCKADDR'][0], self._config['MASTER_SOCKADDR'][1])
 
-    # Aliased in __init__ to datagramReceived if system is a master
-    def master_datagramReceived(self, _data, _sockaddr):
+    # Aliased in __init__ to datagram_received if system is a master
+    def master_datagram_received(self, _data, _sockaddr):
         # Keep This Line Commented Unless HEAVILY Debugging!
         # logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_data))
 
@@ -365,7 +387,7 @@ class HBSYSTEM(DatagramProtocol):
                     for _peer in self._peers:
                         if _peer != _peer_id:
                             pkt[1] = _peer
-                            self.transport.write(b''.join(pkt), self._peers[_peer]['SOCKADDR'])
+                            self.transport.sendto(b''.join(pkt), self._peers[_peer]['SOCKADDR'])
                             #logger.debug('(%s) Packet on TS%s from %s (%s) for destination ID %s repeated to peer: %s (%s) [Stream ID: %s]', self._system, _slot, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id), int_id(_dst_id), self._peers[_peer]['CALLSIGN'], int_id(_peer), int_id(_stream_id))
 
 
@@ -410,10 +432,10 @@ class HBSYSTEM(DatagramProtocol):
                     self._peers[_peer_id]['CONNECTION'] = 'CHALLENGE_SENT'
                     logger.info('(%s) Sent Challenge Response to %s for login: %s', self._system, int_id(_peer_id), self._peers[_peer_id]['SALT'])
                 else:
-                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
             else:
-                self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                 logger.warning('(%s) Registration denied from Radio ID: %s Maximum number of peers exceeded', self._system, int_id(_peer_id))
 
         elif _command == RPTK:    # Repeater has answered our login challenge
@@ -432,10 +454,10 @@ class HBSYSTEM(DatagramProtocol):
                     logger.info('(%s) Peer %s has completed the login exchange successfully', self._system, _this_peer['RADIO_ID'])
                 else:
                     logger.info('(%s) Peer %s has FAILED the login exchange successfully', self._system, _this_peer['RADIO_ID'])
-                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     del self._peers[_peer_id]
             else:
-                self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                 logger.warning('(%s) Login challenge from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
 
         elif _command == RPTC:    # Repeater is sending it's configuraiton OR disconnecting
@@ -445,7 +467,7 @@ class HBSYSTEM(DatagramProtocol):
                             and self._peers[_peer_id]['CONNECTION'] == 'YES' \
                             and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
                     logger.info('(%s) Peer is closing down: %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
-                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     del self._peers[_peer_id]
 
             else:
@@ -475,7 +497,7 @@ class HBSYSTEM(DatagramProtocol):
                     self.send_peer(_peer_id, b''.join([RPTACK, _peer_id]))
                     logger.info('(%s) Peer %s (%s) has sent repeater configuration', self._system, _this_peer['CALLSIGN'], _this_peer['RADIO_ID'])
                 else:
-                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Peer info from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
 
         elif _command == DMRC:
@@ -520,10 +542,10 @@ class HBSYSTEM(DatagramProtocol):
 
                         logger.info('(%s) DMRC login from %s. DMRC HBP PDU: %s', self._system, int_id(_peer_id), ahex(_data))
                 else:
-                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Invalid DMRC Login or Update from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
             else:
-                self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                 logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied, Maximum number of peers exceeded', self._system, _sockaddr[0], int_id(_peer_id))
 
         elif _command == RPTP:    # RPTPing -- peer is pinging us
@@ -536,7 +558,7 @@ class HBSYSTEM(DatagramProtocol):
                     self.send_peer(_peer_id, b''.join([MSTPONG, _peer_id]))
                     logger.debug('(%s) Received and answered RPTPING from peer %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
                 else:
-                    self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Ping from Radio ID that is not logged in: %s', self._system, int_id(_peer_id))
 
         elif _command == RPTO:
@@ -545,7 +567,7 @@ class HBSYSTEM(DatagramProtocol):
                         and self._peers[_peer_id]['CONNECTION'] == 'YES' \
                         and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
                 logger.info('(%s) Peer %s (%s) has send options: %s', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id), _data[8:])
-                self.transport.write(b''.join([RPTACK, _peer_id]), _sockaddr)
+                self.transport.sendto(b''.join([RPTACK, _peer_id]), _sockaddr)
 
         elif _command == DMRA:
             _peer_id = _data[4:8]
@@ -554,8 +576,8 @@ class HBSYSTEM(DatagramProtocol):
         else:
             logger.error('(%s) Unrecognized command. Raw HBP PDU: %s', self._system, ahex(_data))
 
-    # Aliased in __init__ to datagramReceived if system is a peer
-    def peer_datagramReceived(self, _data, _sockaddr):
+    # Aliased in __init__ to datagram_received if system is a peer
+    def peer_datagram_received(self, _data, _sockaddr):
         # Keep This Line Commented Unless HEAVILY Debugging!
         # logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_data))
 
@@ -686,44 +708,80 @@ class HBSYSTEM(DatagramProtocol):
 #
 # Socket-based reporting section
 #
-class report(NetstringReceiver):
+# Per-connection reporting protocol. Frames messages as netstrings ("<len>:<data>,")
+# to preserve the wire format the previous twisted NetstringReceiver used.
+class report(asyncio.Protocol):
     def __init__(self, factory):
         self._factory = factory
+        self._buf = bytearray()
+        self.transport = None
 
-    def connectionMade(self):
-        self._factory.clients.append(self)
-        logger.info('(REPORT) HBlink reporting client connected: %s', self.transport.getPeer())
+    def connection_made(self, transport):
+        peername = transport.get_extra_info('peername')
+        host = peername[0] if peername else ''
+        clients = self._factory._config['REPORTS']['REPORT_CLIENTS']
+        if host in clients or '*' in clients:
+            self.transport = transport
+            self._factory.clients.append(self)
+            logger.info('(REPORT) HBlink reporting client connected: %s', peername)
+        else:
+            logger.error('(REPORT) Invalid report server connection attempt from: %s', peername)
+            transport.close()
 
-    def connectionLost(self, reason):
-        logger.info('(REPORT) HBlink reporting client disconnected: %s', self.transport.getPeer())
-        self._factory.clients.remove(self)
+    def connection_lost(self, exc):
+        if self in self._factory.clients:
+            self._factory.clients.remove(self)
+        logger.info('(REPORT) HBlink reporting client disconnected')
 
-    def stringReceived(self, data):
-        self.process_message(data)
+    def data_received(self, data):
+        self._buf += data
+        # Parse as many complete netstrings as are buffered
+        while True:
+            colon = self._buf.find(b':')
+            if colon < 0:
+                break
+            try:
+                length = int(self._buf[:colon].decode('ascii'))
+            except ValueError:
+                logger.error('(REPORT) malformed netstring, dropping client buffer')
+                self._buf.clear()
+                break
+            end = colon + 1 + length
+            if len(self._buf) < end + 1:        # need full payload plus trailing comma
+                break
+            payload = bytes(self._buf[colon + 1:end])
+            del self._buf[:end + 1]
+            self.process_message(payload)
+
+    def send_string(self, _data):
+        self.transport.write(b''.join([str(len(_data)).encode(), b':', _data, b',']))
 
     def process_message(self, _message):
         opcode = _message[:1]
         if opcode == REPORT_OPCODES['CONFIG_REQ']:
-            logger.info('(REPORT) HBlink reporting client sent \'CONFIG_REQ\': %s', self.transport.getPeer())
-            self.send_config()
+            logger.info('(REPORT) HBlink reporting client sent \'CONFIG_REQ\': %s', self.transport.get_extra_info('peername'))
+            self._factory.send_config()
         else:
             logger.error('(REPORT) got unknown opcode')
 
-class reportFactory(Factory):
+# Manages the set of connected reporting clients. Doubles as the asyncio
+# protocol factory (it is callable) passed to loop.create_server().
+class reportFactory:
     def __init__(self, config):
         self._config = config
+        self.clients = []
 
-    def buildProtocol(self, addr):
-        if (addr.host) in self._config['REPORTS']['REPORT_CLIENTS'] or '*' in self._config['REPORTS']['REPORT_CLIENTS']:
-            logger.debug('(REPORT) Permitting report server connection attempt from: %s:%s', addr.host, addr.port)
-            return report(self)
-        else:
-            logger.error('(REPORT) Invalid report server connection attempt from: %s:%s', addr.host, addr.port)
-            return None
+    def __call__(self):
+        return report(self)
+
+    async def start(self, port):
+        loop = asyncio.get_running_loop()
+        self._server = await loop.create_server(self, None, port)
+        logger.info('(REPORT) HBlink reporting server listening on port %s', port)
 
     def send_clients(self, _message):
         for client in self.clients:
-            client.sendString(_message)
+            client.send_string(_message)
 
     def send_config(self):
         serialized = pickle.dumps(self._config['SYSTEMS'], protocol=2) #.decode('utf-8', errors='ignore') #pickle.HIGHEST_PROTOCOL)
@@ -790,35 +848,42 @@ if __name__ == '__main__':
     logger.info('\n\nCopyright (c) 2013, 2014, 2015, 2016, 2018, 2019, 2020\n\tThe Regents of the K0USY Group. All rights reserved.\n')
     logger.debug('(GLOBAL) Logging system started, anything from here on gets logged')
 
-    # Set up the signal handler
-    def sig_handler(_signal, _frame):
-        logger.info('(GLOBAL) SHUTDOWN: HBLINK IS TERMINATING WITH SIGNAL %s', str(_signal))
-        hblink_handler(_signal, _frame)
-        logger.info('(GLOBAL) SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING REACTOR')
-        reactor.stop()
-
-    # Set signal handers so that we can gracefully exit if need be
-    for sig in [signal.SIGTERM, signal.SIGINT]:
-        signal.signal(sig, sig_handler)
-
     peer_ids, subscriber_ids, talkgroup_ids = mk_aliases(CONFIG)
 
-    # INITIALIZE THE REPORTING LOOP
-    if CONFIG['REPORTS']['REPORT']:
-        report_server = config_reports(CONFIG, reportFactory)
-    else:
-        report_server = None
-        logger.info('(REPORT) TCP Socket reporting not configured')
+    # The asyncio entry point: install signal handlers, start the reporting
+    # server, bind a UDP endpoint for each enabled system, then wait for shutdown.
+    async def async_main():
+        loop = asyncio.get_running_loop()
+        stop_event = asyncio.Event()
 
-    # HBlink instance creation
-    logger.info('(GLOBAL) HBlink \'HBlink.py\' -- SYSTEM STARTING...')
-    for system in CONFIG['SYSTEMS']:
-        if CONFIG['SYSTEMS'][system]['ENABLED']:
-            if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
-                systems[system] = OPENBRIDGE(system, CONFIG, report_server)
-            else:
-                systems[system] = HBSYSTEM(system, CONFIG, report_server)
-            reactor.listenUDP(CONFIG['SYSTEMS'][system]['PORT'], systems[system], interface=CONFIG['SYSTEMS'][system]['IP'])
-            logger.debug('(GLOBAL) %s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
+        def shutdown(signum):
+            logger.info('(GLOBAL) SHUTDOWN: HBLINK IS TERMINATING WITH SIGNAL %s', signum)
+            hblink_handler(signum, None)
+            logger.info('(GLOBAL) SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING')
+            stop_event.set()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, shutdown, sig)
 
-    reactor.run()
+        # INITIALIZE THE REPORTING LOOP
+        if CONFIG['REPORTS']['REPORT']:
+            report_server = config_reports(CONFIG, reportFactory)
+        else:
+            report_server = None
+            logger.info('(REPORT) TCP Socket reporting not configured')
+
+        # HBlink instance creation
+        logger.info('(GLOBAL) HBlink \'HBlink.py\' -- SYSTEM STARTING...')
+        for system in CONFIG['SYSTEMS']:
+            if CONFIG['SYSTEMS'][system]['ENABLED']:
+                if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
+                    systems[system] = OPENBRIDGE(system, CONFIG, report_server)
+                else:
+                    systems[system] = HBSYSTEM(system, CONFIG, report_server)
+                await loop.create_datagram_endpoint(
+                    lambda s=systems[system]: s,
+                    local_addr=(CONFIG['SYSTEMS'][system]['IP'], CONFIG['SYSTEMS'][system]['PORT']))
+                logger.debug('(GLOBAL) %s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
+
+        await stop_event.wait()
+
+    asyncio.run(async_main())

@@ -1,12 +1,14 @@
 # Core runtime dependencies for the HBlink3 routing applications
 # (hblink.py, bridge.py, bridge_all.py).
 #
+# The networking core uses Python's stdlib asyncio -- no Twisted required.
+#
 # Removed in the 2026 cleanup:
 #   configparser  -- part of the Python 3 standard library; the pin was a no-op
-#   bitstring     -- only used by the optional voice utilities (mk_voice.py),
-#                    not by the core routing apps
+#   bitstring     -- only used by the optional voice utilities (mk_voice.py)
+#   Twisted       -- replaced by asyncio; only the legacy, unmigrated voice
+#                    utilities (playback.py, play_ambe.py) still import it
 #
 # Floors are conservative; the versions these were last tested against are noted.
 bitarray>=2.0.0      # tested: 3.8.1
-Twisted>=22.10.0     # tested: 26.4.0  (to be dropped if/when we move to asyncio)
 dmr_utils3>=0.1.30   # tested: 0.1.30

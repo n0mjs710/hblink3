@@ -35,14 +35,10 @@ import sys
 from bitarray import bitarray
 from time import time
 import importlib.util
-
-# Twisted is pretty important, so I keep it separate
-from twisted.internet.protocol import Factory, Protocol
-from twisted.protocols.basic import NetstringReceiver
-from twisted.internet import reactor, task
+import asyncio
 
 # Things we import from the main hblink module
-from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, reportFactory, REPORT_OPCODES, mk_aliases
+from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, reportFactory, REPORT_OPCODES, mk_aliases, run_periodic
 from dmr_utils3.utils import bytes_3, int_id, get_alias
 from dmr_utils3 import decode, bptc, const
 import config
@@ -81,6 +77,10 @@ UNIT_MAP = {}
 BRIDGE_SRC_INDEX = {}
 BRIDGE_BY_SYSTEM = {}
 
+# The reporting server manager; assigned in async_main when REPORT is enabled.
+# Module-global so the rule-timer and stream-trimmer loops can reach it.
+report_server = None
+
 
 # Generate the full (header & terminator) and embedded Link Control for a
 # re-targeted group stream. Returns (H_LC, T_LC, EMB_LC). Pure -- no side effects.
@@ -110,20 +110,19 @@ def embed_lc(_dmrpkt, _frame_type, _dtype_vseq, _h_lc, _t_lc, _emb_lc):
 #
 # REPORT BASED ON THE TYPE SELECTED IN THE MAIN CONFIG FILE
 def config_reports(_config, _factory):
-    if True: #_config['REPORTS']['REPORT']:
-        def reporting_loop(logger, _server):
-            logger.debug('(REPORT) Periodic reporting loop started')
-            _server.send_config()
-            _server.send_bridge()
+    def reporting_loop(logger, _server):
+        logger.debug('(REPORT) Periodic reporting loop started')
+        _server.send_config()
+        _server.send_bridge()
 
-        logger.info('(REPORT) HBlink TCP reporting server configured')
+    logger.info('(REPORT) HBlink TCP reporting server configured')
 
-        report_server = _factory(_config)
-        report_server.clients = []
-        reactor.listenTCP(_config['REPORTS']['REPORT_PORT'], report_server)
-
-        reporting = task.LoopingCall(reporting_loop, logger, report_server)
-        reporting.start(_config['REPORTS']['REPORT_INTERVAL'])
+    report_server = _factory(_config)
+    report_server.clients = []
+    loop = asyncio.get_event_loop()
+    loop.create_task(report_server.start(_config['REPORTS']['REPORT_PORT']))
+    loop.create_task(run_periodic(_config['REPORTS']['REPORT_INTERVAL'],
+                                  reporting_loop, '(REPORT) reporting', logger, report_server))
 
     return report_server
 
@@ -904,17 +903,6 @@ if __name__ == '__main__':
     logger.info('\n\nCopyright (c) 2013, 2014, 2015, 2016, 2018, 2019, 2020\n\tThe Regents of the K0USY Group. All rights reserved.\n')
     logger.debug('(GLOBAL) Logging system started, anything from here on gets logged')
 
-    # Set up the signal handler
-    def sig_handler(_signal, _frame):
-        logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING WITH SIGNAL %s', str(_signal))
-        hblink_handler(_signal, _frame)
-        logger.info('(GLOBAL) SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING REACTOR')
-        reactor.stop()
-
-    # Set signal handers so that we can gracefully exit if need be
-    for sig in [signal.SIGINT, signal.SIGTERM]:
-        signal.signal(sig, sig_handler)
-
     # Create the name-number mapping dictionaries
     peer_ids, subscriber_ids, talkgroup_ids = mk_aliases(CONFIG)
     
@@ -936,36 +924,45 @@ if __name__ == '__main__':
     # Get rule parameter for private calls
     UNIT = rules_module.UNIT
 
-    # INITIALIZE THE REPORTING LOOP
-    if CONFIG['REPORTS']['REPORT']:
-        report_server = config_reports(CONFIG, bridgeReportFactory)
-    else:
-        report_server = None
-        logger.info('(REPORT) TCP Socket reporting not configured')
+    # The asyncio entry point: signal handling, reporting, a UDP endpoint for each
+    # enabled system, and the rule-timer / stream-trimmer periodic tasks.
+    async def async_main():
+        global report_server
+        loop = asyncio.get_running_loop()
+        stop_event = asyncio.Event()
 
-    # HBlink instance creation
-    logger.info('(GLOBAL) HBlink \'bridge.py\' -- SYSTEM STARTING...')
-    for system in CONFIG['SYSTEMS']:
-        if CONFIG['SYSTEMS'][system]['ENABLED']:
-            if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
-                systems[system] = routerOBP(system, CONFIG, report_server)
-            else:
-                systems[system] = routerHBP(system, CONFIG, report_server)
-            reactor.listenUDP(CONFIG['SYSTEMS'][system]['PORT'], systems[system], interface=CONFIG['SYSTEMS'][system]['IP'])
-            logger.debug('(GLOBAL) %s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
+        def shutdown(signum):
+            logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING WITH SIGNAL %s', signum)
+            hblink_handler(signum, None)
+            logger.info('(GLOBAL) SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING')
+            stop_event.set()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, shutdown, sig)
 
-    def loopingErrHandle(failure):
-        logger.error('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error in timed loop.\n %s', failure)
-        reactor.stop()
+        # INITIALIZE THE REPORTING LOOP
+        if CONFIG['REPORTS']['REPORT']:
+            report_server = config_reports(CONFIG, bridgeReportFactory)
+        else:
+            report_server = None
+            logger.info('(REPORT) TCP Socket reporting not configured')
 
-    # Initialize the rule timer -- this if for user activated stuff
-    rule_timer_task = task.LoopingCall(rule_timer_loop)
-    rule_timer = rule_timer_task.start(60)
-    rule_timer.addErrback(loopingErrHandle)
+        # HBlink instance creation
+        logger.info('(GLOBAL) HBlink \'bridge.py\' -- SYSTEM STARTING...')
+        for system in CONFIG['SYSTEMS']:
+            if CONFIG['SYSTEMS'][system]['ENABLED']:
+                if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
+                    systems[system] = routerOBP(system, CONFIG, report_server)
+                else:
+                    systems[system] = routerHBP(system, CONFIG, report_server)
+                await loop.create_datagram_endpoint(
+                    lambda s=systems[system]: s,
+                    local_addr=(CONFIG['SYSTEMS'][system]['IP'], CONFIG['SYSTEMS'][system]['PORT']))
+                logger.debug('(GLOBAL) %s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
 
-    # Initialize the stream trimmer
-    stream_trimmer_task = task.LoopingCall(stream_trimmer_loop)
-    stream_trimmer = stream_trimmer_task.start(5)
-    stream_trimmer.addErrback(loopingErrHandle)
+        # Initialize the rule timer (user-activated stuff) and the stream trimmer
+        loop.create_task(run_periodic(60, rule_timer_loop, '(ROUTER) rule timer'))
+        loop.create_task(run_periodic(5, stream_trimmer_loop, '(ROUTER) stream trimmer'))
 
-    reactor.run()
+        await stop_event.wait()
+
+    asyncio.run(async_main())

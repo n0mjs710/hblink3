@@ -18,6 +18,13 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
+# ============================================================================
+# LEGACY -- NOT MIGRATED TO ASYNCIO.
+# The core (hblink.py) moved from Twisted to asyncio in the 2026 cleanup. This
+# utility still uses Twisted (reactor) and subclasses the now-asyncio HBSYSTEM,
+# so it will NOT run against the current core without being migrated. It is kept
+# for reference; install Twisted separately if you intend to revive/port it.
+# ============================================================================
 
 # Python modules we need
 import sys
