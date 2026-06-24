@@ -16,6 +16,13 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+The optional web [dashboard](dashboard/) can share this same virtualenv — it only
+adds FastAPI and Uvicorn on top of the core. To include it:
+
+```bash
+pip install -r dashboard/requirements.txt   # or:  pip install -e ".[dashboard]"
+```
+
 ## 2. Configure
 
 Copy the sample config (the live name is git-ignored, so updates won't overwrite your edits):

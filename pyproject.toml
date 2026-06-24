@@ -30,6 +30,14 @@ dependencies = [
     "dmr_utils3>=0.1.30",
 ]
 
+# Optional extras. The dashboard (dashboard/) is a separate program but can share
+# the core's virtualenv:  pip install -e ".[dashboard]"
+[project.optional-dependencies]
+dashboard = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
+
 [project.urls]
 Homepage = "https://github.com/n0mjs710/hblink3"
 
