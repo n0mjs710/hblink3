@@ -30,8 +30,8 @@ import config
 for _name in ('bridge', 'hblink'):
     logging.getLogger(_name).setLevel(logging.CRITICAL)
 
-SAMPLE_CFG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'hblink-SAMPLE.cfg')
+# Self-contained test topology: two HBP masters, one HBP peer, two OpenBridges.
+TEST_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'harness.cfg')
 
 # Bit-field constants for assembling the DMRD flags byte (see datagramReceived).
 _FT_VOICE = 0       # HBPF_VOICE
@@ -80,7 +80,7 @@ class World:
         self.clock = Clock()
         bridge.time = self.clock  # monkeypatch the clock the routers read
 
-        self.CONFIG = config.build_config(SAMPLE_CFG)
+        self.CONFIG = config.build_config(TEST_CFG)
         self.CONFIG['REPORTS']['REPORT'] = False
         bridge.CONFIG = self.CONFIG
 
