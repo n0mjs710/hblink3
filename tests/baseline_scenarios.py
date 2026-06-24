@@ -92,6 +92,27 @@ def hbp_multi_target():
     return _hex(w.captures)
 
 
+def hbp_to_hbp_no_voice_header():
+    # First frame is a burst (no voice header) -> the LC is synthesized from the
+    # header fields rather than decoded, exercising the other src_lc path.
+    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
+    kw = dict(rf_src=bytes_3(312000), dst=bytes_3(3100), peer=bytes_4(312000),
+              slot=1, stream_id=b'\x00\x00\x00\x1a')
+    w.feed_group_burst('MASTER-1', 1, **kw)
+    w.feed_group_burst('MASTER-1', 2, **kw)
+    w.feed_group_terminator('MASTER-1', **kw)
+    return _hex(w.captures)
+
+
+def obp_to_obp_no_voice_header():
+    w = harness.World({'B': [_member('OBP-1', 1, 3100), _member('OBP-2', 1, 3100)]})
+    kw = dict(rf_src=bytes_3(1234), dst=bytes_3(3100), peer=bytes_4(3129100),
+              slot=1, stream_id=b'\x00\x00\x00\x1b')
+    w.feed_group_burst('OBP-1', 1, **kw)
+    w.feed_group_terminator('OBP-1', **kw)
+    return _hex(w.captures)
+
+
 def hbp_contention_second_stream_blocked():
     # Two streams on the same TGID/slot; the second must not produce a duplicate
     # forwarded call while the first is active.
@@ -114,6 +135,8 @@ SCENARIOS = {
     'hbp_to_obp': hbp_to_obp,
     'obp_to_hbp': obp_to_hbp,
     'obp_to_obp': obp_to_obp,
+    'hbp_to_hbp_no_voice_header': hbp_to_hbp_no_voice_header,
+    'obp_to_obp_no_voice_header': obp_to_obp_no_voice_header,
     'hbp_multi_target': hbp_multi_target,
     'hbp_contention_second_stream_blocked': hbp_contention_second_stream_blocked,
 }
