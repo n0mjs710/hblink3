@@ -285,6 +285,32 @@ class HBSYSTEM(DatagramProtocol):
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
         pass
 
+    # Apply GLOBAL then SYSTEM ACLs to an inbound DMRD frame. Returns True if the
+    # call must be dropped (logging each dropped stream only once per slot), else False.
+    # Used by both the master and peer receive paths, which share identical ACL logic.
+    def dmrd_acl_check(self, _rf_src, _dst_id, _slot, _stream_id):
+        def _drop(_msg, _id):
+            if self._laststrid[_slot] != _stream_id:
+                logger.info(_msg, self._system, int_id(_stream_id), int_id(_id))
+                self._laststrid[_slot] = _stream_id
+            return True
+
+        if self._CONFIG['GLOBAL']['USE_ACL']:
+            if not acl_check(_rf_src, self._CONFIG['GLOBAL']['SUB_ACL']):
+                return _drop('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL', _rf_src)
+            if _slot == 1 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG1_ACL']):
+                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', _dst_id)
+            if _slot == 2 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG2_ACL']):
+                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL', _dst_id)
+        if self._config['USE_ACL']:
+            if not acl_check(_rf_src, self._config['SUB_ACL']):
+                return _drop('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL', _rf_src)
+            if _slot == 1 and not acl_check(_dst_id, self._config['TG1_ACL']):
+                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL', _dst_id)
+            if _slot == 2 and not acl_check(_dst_id, self._config['TG2_ACL']):
+                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL', _dst_id)
+        return False
+
     def master_dereg(self):
         for _peer in self._peers:
             self.send_peer(_peer, MSTCL + _peer)
@@ -324,38 +350,8 @@ class HBSYSTEM(DatagramProtocol):
                 _stream_id = _data[16:20]
                 #logger.debug('(%s) DMRD - Seqence: %s, RF Source: %s, Destination ID: %s', self._system, _seq, int_id(_rf_src), int_id(_dst_id))
                 # ACL Processing
-                if self._CONFIG['GLOBAL']['USE_ACL']:
-                    if not acl_check(_rf_src, self._CONFIG['GLOBAL']['SUB_ACL']):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL', self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if _slot == 1 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG1_ACL']):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if _slot == 2 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG2_ACL']):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                if self._config['USE_ACL']:
-                    if not acl_check(_rf_src, self._config['SUB_ACL']):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL', self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if _slot == 1 and not acl_check(_dst_id, self._config['TG1_ACL']):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if _slot == 2 and not acl_check(_dst_id, self._config['TG2_ACL']):
-                        if self._laststrid[_slot]!= _stream_id:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
+                if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
+                    return
 
                 # The basic purpose of a master is to repeat to the peers
                 if self._config['REPEAT'] == True:
@@ -583,38 +579,8 @@ class HBSYSTEM(DatagramProtocol):
                     #logger.debug('(%s) DMRD - Sequence: %s, RF Source: %s, Destination ID: %s', self._system, int_id(_seq), int_id(_rf_src), int_id(_dst_id))
 
                     # ACL Processing
-                    if self._CONFIG['GLOBAL']['USE_ACL']:
-                        if not acl_check(_rf_src, self._CONFIG['GLOBAL']['SUB_ACL']):
-                            if self._laststrid[_slot] != _stream_id:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL', self._system, int_id(_stream_id), int_id(_rf_src))
-                                self._laststrid[_slot] = _stream_id
-                            return
-                        if _slot == 1 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG1_ACL']):
-                            if self._laststrid[_slot] != _stream_id:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                                self._laststrid[_slot] = _stream_id
-                            return
-                        if _slot == 2 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG2_ACL']):
-                            if self._laststrid[_slot] != _stream_id:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                                self._laststrid[_slot] = _stream_id
-                            return
-                    if self._config['USE_ACL']:
-                        if not acl_check(_rf_src, self._config['SUB_ACL']):
-                            if self._laststrid[_slot] != _stream_id:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL', self._system, int_id(_stream_id), int_id(_rf_src))
-                                self._laststrid[_slot] = _stream_id
-                            return
-                        if _slot == 1 and not acl_check(_dst_id, self._config['TG1_ACL']):
-                            if self._laststrid[_slot] != _stream_id:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                                self._laststrid[_slot] = _stream_id
-                            return
-                        if _slot == 2 and not acl_check(_dst_id, self._config['TG2_ACL']):
-                            if self._laststrid[_slot] != _stream_id:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                                self._laststrid[_slot] = _stream_id
-                            return
+                    if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
+                        return
 
 
                     # Userland actions -- typically this is the function you subclass for an application
