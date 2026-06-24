@@ -1,5 +1,12 @@
-bitstring>=3.1.5
-bitarray>=0.8.1
-Twisted>=16.3.0
-dmr_utils3>=0.1.19
-configparser>=3.0.0
+# Core runtime dependencies for the HBlink3 routing applications
+# (hblink.py, bridge.py, bridge_all.py).
+#
+# Removed in the 2026 cleanup:
+#   configparser  -- part of the Python 3 standard library; the pin was a no-op
+#   bitstring     -- only used by the optional voice utilities (mk_voice.py),
+#                    not by the core routing apps
+#
+# Floors are conservative; the versions these were last tested against are noted.
+bitarray>=2.0.0      # tested: 3.8.1
+Twisted>=22.10.0     # tested: 26.4.0  (to be dropped if/when we move to asyncio)
+dmr_utils3>=0.1.30   # tested: 0.1.30

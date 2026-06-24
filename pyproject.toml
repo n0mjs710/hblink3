@@ -1,0 +1,39 @@
+# Packaging / project metadata for HBlink3.
+#
+# HBlink3 is normally run from a clone (e.g. `python bridge.py -c hblink.cfg`),
+# not pip-installed, but keeping dependency and Python-version metadata in the
+# standard location lets tooling (pip, uv, IDEs) discover it correctly.
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hblink3"
+version = "1.0.0"
+description = "Open-source HomeBrew Repeater Protocol (HBP) client/master and conference-bridge router for DMR"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Cortney T. Buffington, N0MJS", email = "n0mjs@me.com" },
+]
+keywords = ["dmr", "hbp", "homebrew", "repeater", "amateur-radio", "mmdvm"]
+
+# The code itself runs on 3.8+. Planned bump to >=3.11 alongside the asyncio
+# migration, to use asyncio.TaskGroup / asyncio.timeout for the maintenance and
+# rule-timer loops that are LoopingCall today.
+requires-python = ">=3.8"
+
+dependencies = [
+    "bitarray>=2.0.0",
+    "Twisted>=22.10.0",
+    "dmr_utils3>=0.1.30",
+]
+
+[project.urls]
+Homepage = "https://github.com/n0mjs710/hblink3"
+
+# The core routing modules. Listed explicitly because they are top-level modules
+# rather than a package, so a `pip install .` resolves them correctly.
+[tool.setuptools]
+py-modules = ["hblink", "bridge", "bridge_all", "config", "const", "log", "reporting_const"]

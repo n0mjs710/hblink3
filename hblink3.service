@@ -1,0 +1,37 @@
+# systemd unit for the HBlink3 conference-bridge router (bridge.py).
+#
+# Install:
+#   sudo cp hblink3.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hblink3
+#
+# Adjust User/Group and the paths below to your install. bridge.py defaults to
+# hblink.cfg and rules.py in its own directory; pass -c/-r in ExecStart to use
+# other files. To run a different app (e.g. the plain proxy), point ExecStart at
+# bridge_all.py or hblink.py instead.
+
+[Unit]
+Description=HBlink3 DMR Conference Bridge Router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cort
+Group=cort
+WorkingDirectory=/home/cort/hblink3
+ExecStart=/home/cort/hblink3/venv/bin/python /home/cort/hblink3/bridge.py
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging to the journal (journalctl -u hblink3)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hblink3
+
+[Install]
+WantedBy=multi-user.target
