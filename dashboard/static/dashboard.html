@@ -33,9 +33,9 @@
   .pill{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;border:1px solid var(--border);color:var(--muted)}
   .call{border-radius:5px;padding:5px 8px;min-height:30px}
   .call.idle{color:#475569;background:var(--panel2)}
-  .call.rx{background:var(--green-bg);color:#86efac;border:1px solid var(--green)}
-  .call.tx{background:var(--orange-bg);color:#fdba74;border:1px solid var(--orange)}
-  .call.hear{background:var(--red-bg);color:#fca5a5;border:1px solid var(--red)}
+  .call.rx{background:var(--green-bg);color:#86efac;border:1px solid var(--green)}        /* receive */
+  .call.tx{background:var(--red-bg);color:#fca5a5;border:1px solid var(--red)}            /* transmit */
+  .call .call-top{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .call b{color:var(--text)}
   .status-ok{color:#4ade80;font-weight:600}
   .status-bad{color:#f87171;font-weight:600}
@@ -83,9 +83,14 @@ function activeList(sys){ const a=[]; for(const k in ST.active){const e=ST.activ
 
 function callCell(e, klass){
   if(!e) return '<div class="call idle">— idle —</div>';
+  const src = e.src_alias ? esc(e.src_alias) : e.src;       // top line prefers the callsign/alias
+  const dst = e.dst_alias ? esc(e.dst_alias) : e.dst;       // TGID name (group) or unit alias
   const d='<span class="js-dur" data-start="'+e._arrived+'">'+dur((Date.now()-e._arrived)/1000)+'</span>';
-  return '<div class="call '+klass+'">'+callShort(e.call_type)+' · '+idName(e.src_alias,e.src)+
-         ' → '+idName(e.dst_alias,e.dst)+' <span class="sub">['+d+']</span></div>';
+  // Top line: call type, source, destination (names).  Bottom: radio ID + elapsed.
+  return '<div class="call '+klass+'">'+
+           '<div class="call-top">'+callShort(e.call_type)+' · '+src+' → '+dst+'</div>'+
+           '<div class="sub mono">'+e.src+' · '+d+'</div>'+
+         '</div>';
 }
 
 // ---------- renderers ----------
@@ -102,7 +107,9 @@ function renderMasters(){
     for(const pid of pids){
       const p=peers[pid];
       const cell=(slot)=>{ const e=act[slot]; if(!e) return callCell(null);
-        return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'hear'); };
+        // Colour purely by direction: the call's own RX/TX for the source peer,
+        // TX (red) for the others, which are hearing the repeated traffic.
+        return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx'); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
       h+='<tr><td class="sysname">'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
          '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+

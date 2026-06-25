@@ -97,7 +97,11 @@ def stream_key(evt):
 def enrich_stream(evt):
     evt['src_alias'] = alias(evt['src'], SUBSCRIBER_IDS)
     evt['peer_alias'] = alias(evt['peer'], PEER_IDS)
-    evt['dst_alias'] = alias(evt['dst'], TALKGROUP_IDS)
+    # A unit call's destination is a subscriber; a group call's is a talkgroup.
+    if evt.get('call_type') == 'UNIT VOICE':
+        evt['dst_alias'] = alias(evt['dst'], SUBSCRIBER_IDS)
+    else:
+        evt['dst_alias'] = alias(evt['dst'], TALKGROUP_IDS)
     return evt
 
 # Convert server-side absolute epochs to "seconds since/until" deltas so the
