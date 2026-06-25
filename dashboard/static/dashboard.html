@@ -32,6 +32,7 @@
   .sub{color:var(--muted);font-size:11px}
   .mono{font-variant-numeric:tabular-nums}
   .sysname{font-weight:600;color:var(--accent)}
+  .bridge-head td{background:var(--panel2);color:var(--accent);font-weight:600;font-size:12px;letter-spacing:.02em;padding-top:9px;padding-bottom:9px}
   .pill{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;border:1px solid var(--border);color:var(--muted)}
   .call{border-radius:5px;padding:5px 8px;min-height:30px}
   .call.idle{color:#475569;background:var(--panel2)}
@@ -159,21 +160,23 @@ function renderOpenbridges(){
 function renderBridges(){
   const names=Object.keys(ST.bridges);
   if(!names.length){ el('bridges').innerHTML='<div class="empty">No conference bridges (or running bridge_all / hblink standalone)</div>'; return; }
-  let h='';
+  // One shared table for all bridges so every column lines up across them
+  // (each bridge gets a full-width sub-header row). Per-bridge tables auto-size
+  // their columns independently, which misaligns Action width and wide TGIDs.
+  let h='<table class="bridges"><tr><th>System</th><th>TS</th><th>TGID</th><th>Status</th><th>Timeout</th><th>Action</th><th>Connect TGIDs</th><th>Disconnect TGIDs</th></tr>';
   for(const b of names){
-    h+='<h3>'+esc(b)+'</h3><table><tr><th>System</th><th>TS</th><th>TGID</th><th>Status</th><th>Timeout</th><th>Action</th><th>Connect TGIDs</th><th>Disconnect TGIDs</th></tr>';
+    h+='<tr class="bridge-head"><td colspan="8">'+esc(b)+'</td></tr>';
     for(const m of ST.bridges[b]){
       const on=m.ACTIVE;
       const to = m.TO_TYPE==='ON'||m.TO_TYPE==='OFF';
       const rem = to ? '<span class="js-countdown mono" data-rem="'+(m.remaining==null?0:m.remaining)+'" data-arr="'+Date.now()+'">'+(m.remaining<=0?'expired':dur(m.remaining))+'</span>' : '<span class="sub">N/A</span>';
       const act = m.TO_TYPE==='ON'?'Disconnect':m.TO_TYPE==='OFF'?'Connect':'<span class="sub">None</span>';
-      h+='<tr><td class="sysname">'+esc(m.SYSTEM)+'</td><td class="mono">'+m.TS+'</td><td>'+idName(m.TGID_NAME,m.TGID)+'</td>'+
+      h+='<tr><td class="sysname">'+esc(m.SYSTEM)+'</td><td class="mono">'+m.TS+'</td><td class="mono">'+idName(m.TGID_NAME,m.TGID)+'</td>'+
          '<td><span class="'+(on?'status-ok':'status-bad')+'">'+(on?'Connected':'Disconnected')+'</span></td>'+
          '<td>'+rem+'</td><td>'+act+'</td><td class="mono sub">'+(m.ON||[]).join(', ')+'</td><td class="mono sub">'+(m.OFF||[]).join(', ')+'</td></tr>';
     }
-    h+='</table>';
   }
-  el('bridges').innerHTML=h;
+  el('bridges').innerHTML=h+'</table>';
 }
 
 function logRow(e){
