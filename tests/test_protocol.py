@@ -25,8 +25,8 @@ import hblink
 # Quiet the protocol's INFO chatter (assertLogs elsewhere still works, since it
 # temporarily lowers the level within its own context).
 logging.getLogger('hblink').setLevel(logging.CRITICAL)
-from dmr_utils3.utils import bytes_4
-from const import RPTL, RPTK, RPTC, RPTACK, MSTNAK, DMRD
+from dmr_utils3.utils import bytes_3, bytes_4
+from const import RPTL, RPTK, RPTC, RPTACK, MSTNAK, DMRD, HBPF_SLT_VHEAD, HBPF_SLT_VTERM
 
 CFG = config.build_config(os.path.join(_HERE, 'harness.cfg'))
 
@@ -183,6 +183,54 @@ class TestTransportSend(unittest.TestCase):
         self.assertEqual(len(peer.transport.sent), 1)
         _, addr = peer.transport.sent[0]
         self.assertEqual(addr, CFG['SYSTEMS']['REPEATER-1']['MASTER_SOCKADDR'])
+
+
+class TestSupersessionEnd(unittest.TestCase):
+    """routerHBP._end_slot_stream emits a matching END for a slot's un-terminated
+    stream (superseded by a new stream, or timed out) so consumers don't leak it."""
+
+    def _router(self):
+        import bridge
+        cfg = {'REPORTS': {'REPORT': True}, 'SYSTEMS': CFG['SYSTEMS']}
+        bridge.CONFIG = cfg
+        captured = []
+
+        class Rep:
+            def send_bridgeEvent(self, data):
+                captured.append(data.decode() if isinstance(data, (bytes, bytearray)) else data)
+
+        return bridge.routerHBP('MASTER-1', cfg, Rep()), captured
+
+    def _activate(self, st, ct='GROUP VOICE'):
+        st['RX_TYPE'] = HBPF_SLT_VHEAD          # an active (non-terminated) stream
+        st['RX_CT'] = ct
+        st['RX_STREAM_ID'] = bytes_4(12345)
+        st['RX_PEER'] = bytes_4(312100)
+        st['RX_RFS'] = bytes_3(3120001)
+        st['RX_TGID'] = bytes_3(3100)
+        st['RX_START'] = 100.0
+        st['RX_TIME'] = 104.2
+
+    def test_emits_end_and_marks_terminated(self):
+        r, cap = self._router()
+        self._activate(r.STATUS[1])
+        r._end_slot_stream(1)
+        self.assertEqual(cap, ['GROUP VOICE,END,RX,MASTER-1,12345,312100,3120001,1,3100,4.20'])
+        self.assertEqual(r.STATUS[1]['RX_TYPE'], HBPF_SLT_VTERM)
+        # idempotent: a second call (already terminated) emits nothing more
+        r._end_slot_stream(1)
+        self.assertEqual(len(cap), 1)
+
+    def test_unit_call_type_preserved(self):
+        r, cap = self._router()
+        self._activate(r.STATUS[2], ct='UNIT VOICE')
+        r._end_slot_stream(2)
+        self.assertTrue(cap[0].startswith('UNIT VOICE,END,RX,MASTER-1,12345,'))
+
+    def test_no_event_for_idle_slot(self):
+        r, cap = self._router()
+        r._end_slot_stream(1)                   # slot starts terminated (RX_TYPE == VTERM)
+        self.assertEqual(cap, [])
 
 
 if __name__ == '__main__':

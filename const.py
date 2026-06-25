@@ -38,6 +38,10 @@ ID_MAX = 16776415
 
 # Timers
 STREAM_TO = .360
+# Seconds of no audio after which a stream is declared ended. On RF, a gap this
+# long means sync is lost and any resumption is a new stream (late entry), so the
+# stream is over -- we time it out and emit an END.
+STREAM_TIMEOUT = 2
 
 # Options from the LC - used for late entry
 LC_OPT = b'\x00\x00\x20'

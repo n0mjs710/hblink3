@@ -221,16 +221,14 @@ def stream_trimmer_loop():
             for slot in range(1,3):
                 _slot  = systems[system].STATUS[slot]
 
-                # RX slot check
-                if _slot['RX_TYPE'] != HBPF_SLT_VTERM and _slot['RX_TIME'] <  _now - 5:
-                    _slot['RX_TYPE'] = HBPF_SLT_VTERM
+                # RX slot check -- time out a stream with no audio for STREAM_TIMEOUT
+                if _slot['RX_TYPE'] != HBPF_SLT_VTERM and _slot['RX_TIME'] <  _now - STREAM_TIMEOUT:
                     logger.info('(%s) *TIME OUT*  RX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f', \
                         system, int_id(_slot['RX_STREAM_ID']), int_id(_slot['RX_RFS']), int_id(_slot['RX_TGID']), slot, _slot['RX_TIME'] - _slot['RX_START'])
-                    if CONFIG['REPORTS']['REPORT']:
-                        systems[system]._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(system, int_id(_slot['RX_STREAM_ID']), int_id(_slot['RX_PEER']), int_id(_slot['RX_RFS']), slot, int_id(_slot['RX_TGID']), _slot['RX_TIME'] - _slot['RX_START']).encode(encoding='utf-8', errors='ignore'))
+                    systems[system]._end_slot_stream(slot)
 
                 # TX slot check
-                if _slot['TX_TYPE'] != HBPF_SLT_VTERM and _slot['TX_TIME'] <  _now - 5:
+                if _slot['TX_TYPE'] != HBPF_SLT_VTERM and _slot['TX_TIME'] <  _now - STREAM_TIMEOUT:
                     _slot['TX_TYPE'] = HBPF_SLT_VTERM
                     logger.info('(%s) *TIME OUT*  TX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f', \
                         system, int_id(_slot['TX_STREAM_ID']), int_id(_slot['TX_RFS']), int_id(_slot['TX_TGID']), slot, _slot['TX_TIME'] - _slot['TX_START'])
@@ -242,7 +240,7 @@ def stream_trimmer_loop():
         if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
             remove_list = []
             for stream_id in systems[system].STATUS:
-                if systems[system].STATUS[stream_id]['LAST'] < _now - 5:
+                if systems[system].STATUS[stream_id]['LAST'] < _now - STREAM_TIMEOUT:
                     remove_list.append(stream_id)
             for stream_id in remove_list:
                 if stream_id in systems[system].STATUS:
@@ -517,6 +515,7 @@ class routerHBP(HBSYSTEM):
                 'TX_TIME':      time(),
                 'RX_TYPE':      HBPF_SLT_VTERM,
                 'TX_TYPE':      HBPF_SLT_VTERM,
+                'RX_CT':        'GROUP VOICE',
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
                 'TX_T_LC':      b'\x00',
@@ -543,6 +542,7 @@ class routerHBP(HBSYSTEM):
                 'TX_TIME':      time(),
                 'RX_TYPE':      HBPF_SLT_VTERM,
                 'TX_TYPE':      HBPF_SLT_VTERM,
+                'RX_CT':        'GROUP VOICE',
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
                 'TX_T_LC':      b'\x00',
@@ -554,6 +554,23 @@ class routerHBP(HBSYSTEM):
                     }
                 }
             }
+
+
+    # If a timeslot is holding a stream that never sent a terminator (it was
+    # superseded by a new stream, or it timed out on the trimmer), declare it
+    # ended and emit a matching END so consumers don't leak it. No-op if the slot
+    # already ended cleanly. Used by both the new-stream path and the trimmer.
+    def _end_slot_stream(self, _slot):
+        st = self.STATUS[_slot]
+        if st['RX_TYPE'] == HBPF_SLT_VTERM:
+            return
+        st['RX_TYPE'] = HBPF_SLT_VTERM
+        if CONFIG['REPORTS']['REPORT'] and self._report:
+            duration = st['RX_TIME'] - st['RX_START']
+            self._report.send_bridgeEvent('{},END,RX,{},{},{},{},{},{},{:.2f}'.format(
+                st.get('RX_CT', 'GROUP VOICE'), self._system, int_id(st['RX_STREAM_ID']),
+                int_id(st['RX_PEER']), int_id(st['RX_RFS']), _slot, int_id(st['RX_TGID']),
+                duration).encode(encoding='utf-8', errors='ignore'))
 
 
     def group_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _frame_type, _dtype_vseq, _stream_id, _data):
@@ -571,8 +588,12 @@ class routerHBP(HBSYSTEM):
                 logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> TGID %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
                 return
 
+            # A new stream is taking the slot: end any prior un-terminated stream first
+            self._end_slot_stream(_slot)
+
             # This is a new call stream
             self.STATUS[_slot]['RX_START'] = pkt_time
+            self.STATUS[_slot]['RX_CT'] = 'GROUP VOICE'
             logger.info('(%s) *GROUP CALL START* STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot)
             if CONFIG['REPORTS']['REPORT']:
@@ -757,6 +778,9 @@ class routerHBP(HBSYSTEM):
                 logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> UNIT %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
                 return
                 
+            # A new stream is taking the slot: end any prior un-terminated stream first
+            self._end_slot_stream(_slot)
+
             # Create a destination list for the call:
             if _dst_id in UNIT_MAP:
                 if UNIT_MAP[_dst_id][0] != self._system:
@@ -770,6 +794,7 @@ class routerHBP(HBSYSTEM):
             
             # This is a new call stream, so log & report
             self.STATUS[_slot]['RX_START'] = pkt_time
+            self.STATUS[_slot]['RX_CT'] = 'UNIT VOICE'
             logger.info('(%s) *UNIT CALL START* STREAM ID: %s SUB: %s (%s) PEER: %s (%s) UNIT: %s (%s), TS: %s, FORWARD: %s', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, self._targets)
             if CONFIG['REPORTS']['REPORT']:
@@ -1002,7 +1027,7 @@ if __name__ == '__main__':
 
         # Initialize the rule timer (user-activated stuff) and the stream trimmer
         loop.create_task(run_periodic(60, rule_timer_loop, '(ROUTER) rule timer'))
-        loop.create_task(run_periodic(5, stream_trimmer_loop, '(ROUTER) stream trimmer'))
+        loop.create_task(run_periodic(1, stream_trimmer_loop, '(ROUTER) stream trimmer'))
 
         await stop_event.wait()
 
