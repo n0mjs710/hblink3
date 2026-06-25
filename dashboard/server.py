@@ -109,10 +109,10 @@ def enrich_stream(evt):
 def enrich_config(systems):
     now = time.time()
     for sysview in systems.values():
-        if sysview['MODE'] == 'MASTER':
-            for p in sysview.get('PEERS', {}).values():
+        if sysview['MODE'] == 'SERVER':
+            for p in sysview.get('REPEATERS', {}).values():
                 p['connected_secs'] = int(max(0, now - p.get('CONNECTED', now)))
-        elif sysview['MODE'] == 'PEER':
+        elif sysview['MODE'] == 'OUTBOUND':
             c = sysview.get('STATS', {}).get('CONNECTED')
             sysview['STATS']['connected_secs'] = int(max(0, now - c)) if c else None
     return systems

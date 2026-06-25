@@ -60,8 +60,8 @@
     <div id="conn" class="badge down">HBlink: connecting…</div>
   </header>
 
-  <section><h2>Master Systems</h2><div id="masters"></div></section>
-  <section><h2>Peer Systems</h2><div id="peers"></div></section>
+  <section><h2>Server Systems</h2><div id="servers"></div></section>
+  <section><h2>Outbound Systems</h2><div id="outbounds"></div></section>
   <section><h2>OpenBridge Systems</h2><div id="openbridges"></div></section>
   <section><h2>Conference Bridges</h2><div id="bridges"></div></section>
   <section><h2>Call Log</h2><div id="log"></div></section>
@@ -100,20 +100,20 @@ function callCell(e, klass){
 }
 
 // ---------- renderers ----------
-function renderMasters(){
-  const names = Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='MASTER');
-  if(!names.length){ el('masters').innerHTML='<div class="empty">No master systems</div>'; return; }
+function renderServers(){
+  const names = Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='SERVER');
+  if(!names.length){ el('servers').innerHTML='<div class="empty">No server systems</div>'; return; }
   let h='';
   for(const n of names){
-    const m=ST.systems[n], peers=m.PEERS||{}, act=activeBySlot(n);
-    const pids=Object.keys(peers);
-    h+='<h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' peer(s)</span></h3>';
+    const m=ST.systems[n], repeaters=m.REPEATERS||{}, act=activeBySlot(n);
+    const pids=Object.keys(repeaters);
+    h+='<h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' repeater(s)</span></h3>';
     h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>CC / Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
-    if(!pids.length) h+='<tr><td colspan="6" class="sub">No peers connected</td></tr>';
+    if(!pids.length) h+='<tr><td colspan="6" class="sub">No repeaters connected</td></tr>';
     for(const pid of pids){
-      const p=peers[pid];
+      const p=repeaters[pid];
       const cell=(slot)=>{ const e=act[slot]; if(!e) return callCell(null);
-        // Colour purely by direction: the call's own RX/TX for the source peer,
+        // Colour purely by direction: the call's own RX/TX for the source repeater,
         // TX (red) for the others, which are hearing the repeated traffic.
         return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx'); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
@@ -124,13 +124,13 @@ function renderMasters(){
     }
     h+='</table>';
   }
-  el('masters').innerHTML=h;
+  el('servers').innerHTML=h;
 }
 function fmtFreq(f){ return f && f.length>=7 ? (f.slice(0,3)+'.'+f.slice(3,7)) : esc(f); }
 
-function renderPeers(){
-  const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='PEER');
-  if(!names.length){ el('peers').innerHTML='<div class="empty">No peer systems</div>'; return; }
+function renderOutbounds(){
+  const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='OUTBOUND');
+  if(!names.length){ el('outbounds').innerHTML='<div class="empty">No outbound systems</div>'; return; }
   let h='<table><tr><th>System</th><th>Identity</th><th>Connection</th><th>Pings S/A/L</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
   for(const n of names){
     const s=ST.systems[n], st=s.STATS||{}, act=activeBySlot(n);
@@ -138,11 +138,11 @@ function renderPeers(){
     const pings = (st.PINGS_SENT||0)+' / '+(st.PINGS_ACKD||0)+' / '+((st.PINGS_SENT||0)-(st.PINGS_ACKD||0));
     const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
     h+='<tr><td class="sysname">'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
-       '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · master '+esc(s.MASTER_IP)+':'+esc(s.MASTER_PORT)+'</div></td>'+
+       '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
        '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+esc(st.CONNECTION||'NO')+'</span><div class="sub">up '+since+'</div></td>'+
        '<td class="mono sub">'+pings+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
   }
-  el('peers').innerHTML=h+'</table>';
+  el('outbounds').innerHTML=h+'</table>';
 }
 
 function renderOpenbridges(){
@@ -202,7 +202,7 @@ setInterval(()=>{
 
 // ---------- websocket ----------
 function setConn(up){ ST.hblink=up; const c=el('conn'); c.className='badge '+(up?'up':'down'); c.textContent='HBlink: '+(up?'connected':'disconnected'); }
-function renderAll(){ renderMasters(); renderPeers(); renderOpenbridges(); renderBridges(); renderLog(); }
+function renderAll(){ renderServers(); renderOutbounds(); renderOpenbridges(); renderBridges(); renderLog(); }
 
 function applyStream(e){
   e._arrived = e._arrived || Date.now();
@@ -210,10 +210,10 @@ function applyStream(e){
   if(e.trx==='RX'){ ST.log.unshift(e); if(ST.log.length>400) ST.log.pop(); renderLog(); }
   // re-render the affected system class
   const sys=ST.systems[e.system];
-  if(sys&&sys.MODE==='MASTER') renderMasters();
-  else if(sys&&sys.MODE==='PEER') renderPeers();
+  if(sys&&sys.MODE==='SERVER') renderServers();
+  else if(sys&&sys.MODE==='OUTBOUND') renderOutbounds();
   else if(sys&&sys.MODE==='OPENBRIDGE') renderOpenbridges();
-  else renderMasters();
+  else renderServers();
 }
 
 let sock=null;
@@ -225,7 +225,7 @@ function connect(){
       ST.active={}; (m.streams||[]).forEach(s=>{s._arrived=Date.now(); ST.active[skey(s)]=s;});
       ST.log=(m.log||[]).map(e=>{e._arrived=e._arrived||Date.now();return e;}); renderAll(); }
     else if(m.type==='hblink'){ setConn(m.connected); if(!m.connected){ST.systems={};ST.bridges={};ST.active={};renderAll();} }
-    else if(m.type==='config'){ ST.systems=m.systems||{}; renderMasters(); renderPeers(); renderOpenbridges(); }
+    else if(m.type==='config'){ ST.systems=m.systems||{}; renderServers(); renderOutbounds(); renderOpenbridges(); }
     else if(m.type==='bridges'){ ST.bridges=m.bridges||{}; renderBridges(); }
     else if(m.type==='stream'){ applyStream(m); }
   };

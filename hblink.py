@@ -21,10 +21,11 @@
 '''
 This program does very little on its own. It is intended to be used as a module
 to build applications on top of the HomeBrew Repeater Protocol. By itself, it
-will only act as a peer or master for the systems specified in its configuration
-file (usually hblink.cfg). It is ALWAYS best practice to ensure that this program
-works stand-alone before troubleshooting any applications that use it. It has
-sufficient logging to be used standalone as a troubleshooting application.
+will only act as a server or outbound client for the systems specified in its
+configuration file (usually hblink.cfg). It is ALWAYS best practice to ensure
+that this program works stand-alone before troubleshooting any applications that
+use it. It has sufficient logging to be used standalone as a troubleshooting
+application.
 '''
 
 # Specifig functions from modules we need
@@ -96,7 +97,7 @@ def config_reports(_config, _factory):
     return report_server
 
 
-# Shut ourselves down gracefully by disconnecting from the masters and peers.
+# Shut ourselves down gracefully by disconnecting from servers and repeaters.
 def hblink_handler(_signal, _frame):
     for system in systems:
         logger.info('(GLOBAL) SHUTDOWN: DE-REGISTER SYSTEM: %s', system)
@@ -216,7 +217,7 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
 
 
 #************************************************
-#     HB MASTER CLASS
+#     HB SERVER CLASS
 #************************************************
 
 class HBSYSTEM(asyncio.DatagramProtocol):
@@ -229,19 +230,19 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         self._laststrid = {1: b'', 2: b''}
 
         # Define shortcuts and generic function names based on the type of system we are
-        if self._config['MODE'] == 'MASTER':
-            self._peers = self._CONFIG['SYSTEMS'][self._system]['PEERS']
-            self.send_system = self.send_peers
-            self.maintenance_loop = self.master_maintenance_loop
-            self.datagram_received = self.master_datagram_received
-            self.dereg = self.master_dereg
+        if self._config['MODE'] == 'SERVER':
+            self._repeaters = self._CONFIG['SYSTEMS'][self._system]['REPEATERS']
+            self.send_system = self.send_repeaters
+            self.maintenance_loop = self.server_maintenance_loop
+            self.datagram_received = self.server_datagram_received
+            self.dereg = self.server_dereg
 
-        elif self._config['MODE'] == 'PEER':
+        elif self._config['MODE'] == 'OUTBOUND':
             self._stats = self._config['STATS']
-            self.send_system = self.send_master
-            self.maintenance_loop = self.peer_maintenance_loop
-            self.datagram_received = self.peer_datagram_received
-            self.dereg = self.peer_dereg
+            self.send_system = self.send_server
+            self.maintenance_loop = self.outbound_maintenance_loop
+            self.datagram_received = self.outbound_datagram_received
+            self.dereg = self.outbound_dereg
 
         self._maintenance_task = None
 
@@ -256,23 +257,23 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         if self._maintenance_task:
             self._maintenance_task.cancel()
 
-    # Aliased in __init__ to maintenance_loop if system is a master
-    def master_maintenance_loop(self):
-        logger.debug('(%s) Master maintenance loop started', self._system)
+    # Aliased in __init__ to maintenance_loop if system is a server
+    def server_maintenance_loop(self):
+        logger.debug('(%s) Server maintenance loop started', self._system)
         remove_list = []
-        for peer in self._peers:
-            _this_peer = self._peers[peer]
-            # Check to see if any of the peers have been quiet (no ping) longer than allowed
-            if _this_peer['LAST_PING']+(self._CONFIG['GLOBAL']['PING_TIME']*self._CONFIG['GLOBAL']['MAX_MISSED']) < time():
-                remove_list.append(peer)
-        for peer in remove_list:
-            logger.info('(%s) Peer %s (%s) has timed out and is being removed', self._system, self._peers[peer]['CALLSIGN'], self._peers[peer]['RADIO_ID'])
-            # Remove any timed out peers from the configuration
-            del self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]
+        for repeater in self._repeaters:
+            _this_repeater = self._repeaters[repeater]
+            # Check to see if any of the repeaters have been quiet (no ping) longer than allowed
+            if _this_repeater['LAST_PING']+(self._CONFIG['GLOBAL']['PING_TIME']*self._CONFIG['GLOBAL']['MAX_MISSED']) < time():
+                remove_list.append(repeater)
+        for repeater in remove_list:
+            logger.info('(%s) Repeater %s (%s) has timed out and is being removed', self._system, self._repeaters[repeater]['CALLSIGN'], self._repeaters[repeater]['RADIO_ID'])
+            # Remove any timed out repeaters from the configuration
+            del self._CONFIG['SYSTEMS'][self._system]['REPEATERS'][repeater]
 
-    # Aliased in __init__ to maintenance_loop if system is a peer
-    def peer_maintenance_loop(self):
-        logger.debug('(%s) Peer maintenance loop started', self._system)
+    # Aliased in __init__ to maintenance_loop if system is an outbound client
+    def outbound_maintenance_loop(self):
+        logger.debug('(%s) Outbound maintenance loop started', self._system)
         if self._stats['PING_OUTSTANDING']:
             self._stats['NUM_OUTSTANDING'] += 1
         # If we're not connected, zero out the stats and send a login request RPTL
@@ -282,53 +283,53 @@ class HBSYSTEM(asyncio.DatagramProtocol):
             self._stats['NUM_OUTSTANDING'] = 0
             self._stats['PING_OUTSTANDING'] = False
             self._stats['CONNECTION'] = 'RPTL_SENT'
-            self.send_master(b''.join([RPTL, self._config['RADIO_ID']]))
-            logger.info('(%s) Sending login request to master %s:%s', self._system, self._config['MASTER_IP'], self._config['MASTER_PORT'])
-        # If we are connected, sent a ping to the master and increment the counter
+            self.send_server(b''.join([RPTL, self._config['RADIO_ID']]))
+            logger.info('(%s) Sending login request to server %s:%s', self._system, self._config['SERVER_IP'], self._config['SERVER_PORT'])
+        # If we are connected, send a ping to the server and increment the counter
         if self._stats['CONNECTION'] == 'YES':
-            self.send_master(b''.join([RPTPING, self._config['RADIO_ID']]))
-            logger.debug('(%s) RPTPING Sent to Master. Total Sent: %s, Total Missed: %s, Currently Outstanding: %s', self._system, self._stats['PINGS_SENT'], self._stats['PINGS_SENT'] - self._stats['PINGS_ACKD'], self._stats['NUM_OUTSTANDING'])
+            self.send_server(b''.join([RPTPING, self._config['RADIO_ID']]))
+            logger.debug('(%s) RPTPING Sent to Server. Total Sent: %s, Total Missed: %s, Currently Outstanding: %s', self._system, self._stats['PINGS_SENT'], self._stats['PINGS_SENT'] - self._stats['PINGS_ACKD'], self._stats['NUM_OUTSTANDING'])
             self._stats['PINGS_SENT'] += 1
             self._stats['PING_OUTSTANDING'] = True
 
-    def send_peers(self, _packet):
-        for _peer in self._peers:
-            self.send_peer(_peer, _packet)
-            #logger.debug('(%s) Packet sent to peer %s', self._system, self._peers[_peer]['RADIO_ID'])
+    def send_repeaters(self, _packet):
+        for _repeater in self._repeaters:
+            self.send_repeater(_repeater, _packet)
+            #logger.debug('(%s) Packet sent to repeater %s', self._system, self._repeaters[_repeater]['RADIO_ID'])
 
-    def send_peer(self, _peer, _packet):
+    def send_repeater(self, _repeater, _packet):
         if _packet[:4] == DMRD:
-            _packet = b''.join([_packet[:11], _peer, _packet[15:]])
-        self.transport.sendto(_packet, self._peers[_peer]['SOCKADDR'])
+            _packet = b''.join([_packet[:11], _repeater, _packet[15:]])
+        self.transport.sendto(_packet, self._repeaters[_repeater]['SOCKADDR'])
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
-        #logger.debug('(%s) TX Packet to %s on port %s: %s', self._peers[_peer]['RADIO_ID'], self._peers[_peer]['IP'], self._peers[_peer]['PORT'], ahex(_packet))
+        #logger.debug('(%s) TX Packet to %s on port %s: %s', self._repeaters[_repeater]['RADIO_ID'], self._repeaters[_repeater]['IP'], self._repeaters[_repeater]['PORT'], ahex(_packet))
 
-    # Whether this system can currently deliver bridged call traffic. A PEER can
-    # only forward to its upstream master once it has finished logging in; masters
-    # and OpenBridges are always ready (their own send paths fan out to whatever
-    # is actually connected). Used by the router to skip dead targets.
+    # Whether this system can currently deliver bridged call traffic. An OUTBOUND
+    # client can only forward to its upstream server once it has finished logging
+    # in; servers and OpenBridges are always ready (their own send paths fan out
+    # to whatever is actually connected). Used by the router to skip dead targets.
     def egress_ready(self):
-        if self._config['MODE'] == 'PEER':
+        if self._config['MODE'] == 'OUTBOUND':
             return self._stats['CONNECTION'] == 'YES'
         return True
 
-    def send_master(self, _packet):
+    def send_server(self, _packet):
         if _packet[:4] == DMRD:
-            # Don't push call traffic to the upstream master until we're logged
+            # Don't push call traffic to the upstream server until we're logged
             # in -- it would only be dropped. Login/keepalive packets still flow.
             if self._stats['CONNECTION'] != 'YES':
                 return
             _packet = b''.join([_packet[:11], self._config['RADIO_ID'], _packet[15:]])
-        self.transport.sendto(_packet, self._config['MASTER_SOCKADDR'])
+        self.transport.sendto(_packet, self._config['SERVER_SOCKADDR'])
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
-        # logger.debug('(%s) TX Packet to %s:%s -- %s', self._system, self._config['MASTER_IP'], self._config['MASTER_PORT'], ahex(_packet))
+        # logger.debug('(%s) TX Packet to %s:%s -- %s', self._system, self._config['SERVER_IP'], self._config['SERVER_PORT'], ahex(_packet))
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
         pass
 
     # Apply GLOBAL then SYSTEM ACLs to an inbound DMRD frame. Returns True if the
     # call must be dropped (logging each dropped stream only once per slot), else False.
-    # Used by both the master and peer receive paths, which share identical ACL logic.
+    # Used by both the server and outbound receive paths, which share identical ACL logic.
     def dmrd_acl_check(self, _rf_src, _dst_id, _slot, _stream_id):
         def _drop(_msg, _id):
             if self._laststrid[_slot] != _stream_id:
@@ -352,17 +353,17 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL', _dst_id)
         return False
 
-    def master_dereg(self):
-        for _peer in self._peers:
-            self.send_peer(_peer, MSTCL + _peer)
-            logger.info('(%s) De-Registration sent to Peer: %s (%s)', self._system, self._peers[_peer]['CALLSIGN'], self._peers[_peer]['RADIO_ID'])
+    def server_dereg(self):
+        for _repeater in self._repeaters:
+            self.send_repeater(_repeater, MSTCL + _repeater)
+            logger.info('(%s) De-Registration sent to Repeater: %s (%s)', self._system, self._repeaters[_repeater]['CALLSIGN'], self._repeaters[_repeater]['RADIO_ID'])
 
-    def peer_dereg(self):
-        self.send_master(RPTCL + self._config['RADIO_ID'])
-        logger.info('(%s) De-Registration sent to Master: %s:%s', self._system, self._config['MASTER_SOCKADDR'][0], self._config['MASTER_SOCKADDR'][1])
+    def outbound_dereg(self):
+        self.send_server(RPTCL + self._config['RADIO_ID'])
+        logger.info('(%s) De-Registration sent to Server: %s:%s', self._system, self._config['SERVER_SOCKADDR'][0], self._config['SERVER_SOCKADDR'][1])
 
-    # Aliased in __init__ to datagram_received if system is a master
-    def master_datagram_received(self, _data, _sockaddr):
+    # Aliased in __init__ to datagram_received if system is a server
+    def server_datagram_received(self, _data, _sockaddr):
         # Keep This Line Commented Unless HEAVILY Debugging!
         # logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_data))
 
@@ -371,9 +372,9 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
         if _command == DMRD:    # DMRData -- encapsulated DMR data frame
             _peer_id = _data[11:15]
-            if _peer_id in self._peers \
-                        and self._peers[_peer_id]['CONNECTION'] == 'YES' \
-                        and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
+            if _peer_id in self._repeaters \
+                        and self._repeaters[_peer_id]['CONNECTION'] == 'YES' \
+                        and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
                 _seq = _data[4]
                 _rf_src = _data[5:8]
                 _dst_id = _data[8:11]
@@ -394,14 +395,14 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
                     return
 
-                # The basic purpose of a master is to repeat to the peers
+                # The basic purpose of a server is to repeat to the repeaters
                 if self._config['REPEAT'] == True:
                     pkt = [_data[:11], '', _data[15:]]
-                    for _peer in self._peers:
-                        if _peer != _peer_id:
-                            pkt[1] = _peer
-                            self.transport.sendto(b''.join(pkt), self._peers[_peer]['SOCKADDR'])
-                            #logger.debug('(%s) Packet on TS%s from %s (%s) for destination ID %s repeated to peer: %s (%s) [Stream ID: %s]', self._system, _slot, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id), int_id(_dst_id), self._peers[_peer]['CALLSIGN'], int_id(_peer), int_id(_stream_id))
+                    for _repeater in self._repeaters:
+                        if _repeater != _peer_id:
+                            pkt[1] = _repeater
+                            self.transport.sendto(b''.join(pkt), self._repeaters[_repeater]['SOCKADDR'])
+                            #logger.debug('(%s) Packet on TS%s from %s (%s) for destination ID %s repeated to repeater: %s (%s) [Stream ID: %s]', self._system, _slot, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id), int_id(_dst_id), self._repeaters[_repeater]['CALLSIGN'], int_id(_repeater), int_id(_stream_id))
 
 
                 # Userland actions -- typically this is the function you subclass for an application
@@ -409,12 +410,12 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
         elif _command == RPTL:    # RPTLogin -- a repeater wants to login
             _peer_id = _data[4:8]
-            # Check to see if we've reached the maximum number of allowed peers
-            if len(self._peers) < self._config['MAX_PEERS']:
+            # Check to see if we've reached the maximum number of allowed repeaters
+            if len(self._repeaters) < self._config['MAX_REPEATERS']:
                 # Check for valid Radio ID
                 if acl_check(_peer_id, self._CONFIG['GLOBAL']['REG_ACL']) and acl_check(_peer_id, self._config['REG_ACL']):
-                    # Build the configuration data strcuture for the peer
-                    self._peers.update({_peer_id: {
+                    # Build the configuration data structure for the repeater
+                    self._repeaters.update({_peer_id: {
                         'CONNECTION': 'RPTL-RECEIVED',
                         'CONNECTED': time(),
                         'PINGS_RECEIVED': 0,
@@ -440,35 +441,35 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                         'PACKAGE_ID': '',
                     }})
                     logger.info('(%s) Repeater Logging in with Radio ID: %s, %s:%s', self._system, int_id(_peer_id), _sockaddr[0], _sockaddr[1])
-                    _salt_str = bytes_4(self._peers[_peer_id]['SALT'])
-                    self.send_peer(_peer_id, b''.join([RPTACK, _salt_str]))
-                    self._peers[_peer_id]['CONNECTION'] = 'CHALLENGE_SENT'
-                    logger.info('(%s) Sent Challenge Response to %s for login: %s', self._system, int_id(_peer_id), self._peers[_peer_id]['SALT'])
+                    _salt_str = bytes_4(self._repeaters[_peer_id]['SALT'])
+                    self.send_repeater(_peer_id, b''.join([RPTACK, _salt_str]))
+                    self._repeaters[_peer_id]['CONNECTION'] = 'CHALLENGE_SENT'
+                    logger.info('(%s) Sent Challenge Response to %s for login: %s', self._system, int_id(_peer_id), self._repeaters[_peer_id]['SALT'])
                 else:
                     self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
             else:
                 self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
-                logger.warning('(%s) Registration denied from Radio ID: %s Maximum number of peers exceeded', self._system, int_id(_peer_id))
+                logger.warning('(%s) Registration denied from Radio ID: %s Maximum number of repeaters exceeded', self._system, int_id(_peer_id))
 
         elif _command == RPTK:    # Repeater has answered our login challenge
             _peer_id = _data[4:8]
-            if _peer_id in self._peers \
-                        and self._peers[_peer_id]['CONNECTION'] == 'CHALLENGE_SENT' \
-                        and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
-                _this_peer = self._peers[_peer_id]
-                _this_peer['LAST_PING'] = time()
+            if _peer_id in self._repeaters \
+                        and self._repeaters[_peer_id]['CONNECTION'] == 'CHALLENGE_SENT' \
+                        and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                _this_repeater = self._repeaters[_peer_id]
+                _this_repeater['LAST_PING'] = time()
                 _sent_hash = _data[8:]
-                _salt_str = bytes_4(_this_peer['SALT'])
+                _salt_str = bytes_4(_this_repeater['SALT'])
                 _calc_hash = bhex(sha256(_salt_str+self._config['PASSPHRASE']).hexdigest())
                 if _sent_hash == _calc_hash:
-                    _this_peer['CONNECTION'] = 'WAITING_CONFIG'
-                    self.send_peer(_peer_id, b''.join([RPTACK, _peer_id]))
-                    logger.info('(%s) Peer %s has completed the login exchange successfully', self._system, _this_peer['RADIO_ID'])
+                    _this_repeater['CONNECTION'] = 'WAITING_CONFIG'
+                    self.send_repeater(_peer_id, b''.join([RPTACK, _peer_id]))
+                    logger.info('(%s) Repeater %s has completed the login exchange successfully', self._system, _this_repeater['RADIO_ID'])
                 else:
-                    logger.info('(%s) Peer %s has FAILED the login exchange successfully', self._system, _this_peer['RADIO_ID'])
+                    logger.info('(%s) Repeater %s has FAILED the login exchange successfully', self._system, _this_repeater['RADIO_ID'])
                     self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
-                    del self._peers[_peer_id]
+                    del self._repeaters[_peer_id]
             else:
                 self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                 logger.warning('(%s) Login challenge from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
@@ -476,58 +477,58 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         elif _command == RPTC:    # Repeater is sending it's configuraiton OR disconnecting
             if _data[:5] == RPTCL:    # Disconnect command
                 _peer_id = _data[5:9]
-                if _peer_id in self._peers \
-                            and self._peers[_peer_id]['CONNECTION'] == 'YES' \
-                            and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
-                    logger.info('(%s) Peer is closing down: %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
+                if _peer_id in self._repeaters \
+                            and self._repeaters[_peer_id]['CONNECTION'] == 'YES' \
+                            and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                    logger.info('(%s) Repeater is closing down: %s (%s)', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id))
                     self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
-                    del self._peers[_peer_id]
+                    del self._repeaters[_peer_id]
 
             else:
                 _peer_id = _data[4:8]      # Configure Command
-                if _peer_id in self._peers \
-                            and self._peers[_peer_id]['CONNECTION'] == 'WAITING_CONFIG' \
-                            and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
-                    _this_peer = self._peers[_peer_id]
-                    _this_peer['CONNECTION'] = 'YES'
-                    _this_peer['CONNECTED'] = time()
-                    _this_peer['LAST_PING'] = time()
-                    _this_peer['CALLSIGN'] = _data[8:16]
-                    _this_peer['RX_FREQ'] = _data[16:25]
-                    _this_peer['TX_FREQ'] =  _data[25:34]
-                    _this_peer['TX_POWER'] = _data[34:36]
-                    _this_peer['COLORCODE'] = _data[36:38]
-                    _this_peer['LATITUDE'] = _data[38:46]
-                    _this_peer['LONGITUDE'] = _data[46:55]
-                    _this_peer['HEIGHT'] = _data[55:58]
-                    _this_peer['LOCATION'] = _data[58:78]
-                    _this_peer['DESCRIPTION'] = _data[78:97]
-                    _this_peer['SLOTS'] = _data[97:98]
-                    _this_peer['URL'] = _data[98:222]
-                    _this_peer['SOFTWARE_ID'] = _data[222:262]
-                    _this_peer['PACKAGE_ID'] = _data[262:302]
+                if _peer_id in self._repeaters \
+                            and self._repeaters[_peer_id]['CONNECTION'] == 'WAITING_CONFIG' \
+                            and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                    _this_repeater = self._repeaters[_peer_id]
+                    _this_repeater['CONNECTION'] = 'YES'
+                    _this_repeater['CONNECTED'] = time()
+                    _this_repeater['LAST_PING'] = time()
+                    _this_repeater['CALLSIGN'] = _data[8:16]
+                    _this_repeater['RX_FREQ'] = _data[16:25]
+                    _this_repeater['TX_FREQ'] =  _data[25:34]
+                    _this_repeater['TX_POWER'] = _data[34:36]
+                    _this_repeater['COLORCODE'] = _data[36:38]
+                    _this_repeater['LATITUDE'] = _data[38:46]
+                    _this_repeater['LONGITUDE'] = _data[46:55]
+                    _this_repeater['HEIGHT'] = _data[55:58]
+                    _this_repeater['LOCATION'] = _data[58:78]
+                    _this_repeater['DESCRIPTION'] = _data[78:97]
+                    _this_repeater['SLOTS'] = _data[97:98]
+                    _this_repeater['URL'] = _data[98:222]
+                    _this_repeater['SOFTWARE_ID'] = _data[222:262]
+                    _this_repeater['PACKAGE_ID'] = _data[262:302]
 
-                    self.send_peer(_peer_id, b''.join([RPTACK, _peer_id]))
-                    logger.info('(%s) Peer %s (%s) has sent repeater configuration', self._system, _this_peer['CALLSIGN'], _this_peer['RADIO_ID'])
+                    self.send_repeater(_peer_id, b''.join([RPTACK, _peer_id]))
+                    logger.info('(%s) Repeater %s (%s) has sent repeater configuration', self._system, _this_repeater['CALLSIGN'], _this_repeater['RADIO_ID'])
                 else:
                     self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
-                    logger.warning('(%s) Peer info from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
+                    logger.warning('(%s) Repeater info from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
 
         elif _command == DMRC:
             _peer_id = _data[4:8]
-            # Check to see if we've reached the maximum number of allowed peers
-            if len(self._peers) < self._config['MAX_PEERS']:
+            # Check to see if we've reached the maximum number of allowed repeaters
+            if len(self._repeaters) < self._config['MAX_REPEATERS']:
                 # Check for valid Radio ID
                 if acl_check(_peer_id, self._CONFIG['GLOBAL']['REG_ACL']) and acl_check(_peer_id, self._config['REG_ACL']):
-                    if _peer_id in self._peers:
-                        #    and self._peers[_peer_id][CONNECTED] == 'YES' \
-                        #    and self._peers[_peer_id][SOCKADDR] == _sockaddr:
-                        self._peers[_peer_id]['PINGS_RECEIVED'] += 1
-                        self._peers[_peer_id]['LAST_PING'] = time()
-                        logger.debug('(%s) Received DMRC update from peer %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
+                    if _peer_id in self._repeaters:
+                        #    and self._repeaters[_peer_id][CONNECTED] == 'YES' \
+                        #    and self._repeaters[_peer_id][SOCKADDR] == _sockaddr:
+                        self._repeaters[_peer_id]['PINGS_RECEIVED'] += 1
+                        self._repeaters[_peer_id]['LAST_PING'] = time()
+                        logger.debug('(%s) Received DMRC update from repeater %s (%s)', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id))
                     else:
-                        # Build the configuration data strcuture for the peer
-                        self._peers.update({_peer_id: {
+                        # Build the configuration data structure for the repeater
+                        self._repeaters.update({_peer_id: {
                             'CONNECTION': 'YES',
                             'CONNECTED': time(),
                             'PINGS_RECEIVED': 0,
@@ -559,43 +560,43 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     logger.warning('(%s) Invalid DMRC Login or Update from %s Radio ID: %s Denied by Registation ACL', self._system, _sockaddr[0], int_id(_peer_id))
             else:
                 self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
-                logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied, Maximum number of peers exceeded', self._system, _sockaddr[0], int_id(_peer_id))
+                logger.warning('(%s) Invalid DMRC Login from %s Radio ID: %s Denied, Maximum number of repeaters exceeded', self._system, _sockaddr[0], int_id(_peer_id))
 
-        elif _command == RPTP:    # RPTPing -- peer is pinging us
+        elif _command == RPTP:    # RPTPing -- repeater is pinging us
                 _peer_id = _data[7:11]
-                if _peer_id in self._peers \
-                            and self._peers[_peer_id]['CONNECTION'] == "YES" \
-                            and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
-                    self._peers[_peer_id]['PINGS_RECEIVED'] += 1
-                    self._peers[_peer_id]['LAST_PING'] = time()
-                    self.send_peer(_peer_id, b''.join([MSTPONG, _peer_id]))
-                    logger.debug('(%s) Received and answered RPTPING from peer %s (%s)', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id))
+                if _peer_id in self._repeaters \
+                            and self._repeaters[_peer_id]['CONNECTION'] == "YES" \
+                            and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                    self._repeaters[_peer_id]['PINGS_RECEIVED'] += 1
+                    self._repeaters[_peer_id]['LAST_PING'] = time()
+                    self.send_repeater(_peer_id, b''.join([MSTPONG, _peer_id]))
+                    logger.debug('(%s) Received and answered RPTPING from repeater %s (%s)', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id))
                 else:
                     self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Ping from Radio ID that is not logged in: %s', self._system, int_id(_peer_id))
 
         elif _command == RPTO:
             _peer_id = _data[4:8]
-            if _peer_id in self._peers \
-                        and self._peers[_peer_id]['CONNECTION'] == 'YES' \
-                        and self._peers[_peer_id]['SOCKADDR'] == _sockaddr:
-                logger.info('(%s) Peer %s (%s) has send options: %s', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_peer_id), _data[8:])
+            if _peer_id in self._repeaters \
+                        and self._repeaters[_peer_id]['CONNECTION'] == 'YES' \
+                        and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                logger.info('(%s) Repeater %s (%s) has sent options: %s', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id), _data[8:])
                 self.transport.sendto(b''.join([RPTACK, _peer_id]), _sockaddr)
 
         elif _command == DMRA:
             _peer_id = _data[4:8]
-            logger.info('(%s) Recieved DMR Talker Alias from peer %s, subscriber %s', self._system, self._peers[_peer_id]['CALLSIGN'], int_id(_rf_src))
+            logger.info('(%s) Recieved DMR Talker Alias from repeater %s, subscriber %s', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_rf_src))
 
         else:
             logger.error('(%s) Unrecognized command. Raw HBP PDU: %s', self._system, ahex(_data))
 
-    # Aliased in __init__ to datagram_received if system is a peer
-    def peer_datagram_received(self, _data, _sockaddr):
+    # Aliased in __init__ to datagram_received if system is an outbound client
+    def outbound_datagram_received(self, _data, _sockaddr):
         # Keep This Line Commented Unless HEAVILY Debugging!
         # logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_data))
 
-        # Validate that we receveived this packet from the master - security check!
-        if self._config['MASTER_SOCKADDR'] == _sockaddr:
+        # Validate that we receveived this packet from the server - security check!
+        if self._config['SERVER_SOCKADDR'] == _sockaddr:
             # Extract the command, which is various length, but only 4 significant characters
             _command = _data[:4]
             if   _command == DMRD:    # DMRData -- encapsulated DMR data frame
@@ -627,21 +628,21 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     # Userland actions -- typically this is the function you subclass for an application
                     self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data)
 
-            elif _command == MSTN:    # Actually MSTNAK -- a NACK from the master
+            elif _command == MSTN:    # Actually MSTNAK -- a NACK from the server
                 _peer_id = _data[6:10]
                 if self._config['LOOSE'] or _peer_id == self._config['RADIO_ID']: # Validate the Radio_ID unless using loose validation
-                    logger.warning('(%s) MSTNAK Received. Resetting connection to the Master.', self._system)
+                    logger.warning('(%s) MSTNAK Received. Resetting connection to the Server.', self._system)
                     self._stats['CONNECTION'] = 'NO' # Disconnect ourselves and re-register
                     self._stats['CONNECTED'] = time()
 
-            elif _command == RPTA:    # Actually RPTACK -- an ACK from the master
+            elif _command == RPTA:    # Actually RPTACK -- an ACK from the server
                 # Depending on the state, an RPTACK means different things, in each clause, we check and/or set the state
                 if self._stats['CONNECTION'] == 'RPTL_SENT': # If we've sent a login request...
                     _login_int32 = _data[6:10]
                     logger.info('(%s) Repeater Login ACK Received with 32bit ID: %s', self._system, int_id(_login_int32))
                     _pass_hash = sha256(b''.join([_login_int32, self._config['PASSPHRASE']])).hexdigest()
                     _pass_hash = bhex(_pass_hash)
-                    self.send_master(b''.join([RPTK, self._config['RADIO_ID'], _pass_hash]))
+                    self.send_server(b''.join([RPTK, self._config['RADIO_ID'], _pass_hash]))
                     self._stats['CONNECTION'] = 'AUTHENTICATED'
 
                 elif self._stats['CONNECTION'] == 'AUTHENTICATED': # If we've sent the login challenge...
@@ -666,42 +667,42 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                                               self._config['PACKAGE_ID']\
                                           ])
 
-                        self.send_master(b''.join([RPTC, _config_packet]))
+                        self.send_server(b''.join([RPTC, _config_packet]))
                         self._stats['CONNECTION'] = 'CONFIG-SENT'
                         logger.info('(%s) Repeater Configuration Sent', self._system)
                     else:
                         self._stats['CONNECTION'] = 'NO'
-                        logger.error('(%s) Master ACK Contained wrong ID - Connection Reset', self._system)
+                        logger.error('(%s) Server ACK Contained wrong ID - Connection Reset', self._system)
 
-                elif self._stats['CONNECTION'] == 'CONFIG-SENT': # If we've sent out configuration to the master
+                elif self._stats['CONNECTION'] == 'CONFIG-SENT': # If we've sent out configuration to the server
                     _peer_id = _data[6:10]
                     if self._config['LOOSE'] or _peer_id == self._config['RADIO_ID']: # Validate the Radio_ID unless using loose validation
                         logger.info('(%s) Repeater Configuration Accepted', self._system)
                         if self._config['OPTIONS']:
-                            self.send_master(b''.join([RPTO, self._config['RADIO_ID'], self._config['OPTIONS']]))
+                            self.send_server(b''.join([RPTO, self._config['RADIO_ID'], self._config['OPTIONS']]))
                             self._stats['CONNECTION'] = 'OPTIONS-SENT'
                             logger.info('(%s) Sent options: (%s)', self._system, self._config['OPTIONS'])
                         else:
                             self._stats['CONNECTION'] = 'YES'
                             self._stats['CONNECTED'] = time()
-                            logger.info('(%s) Connection to Master Completed', self._system)
-                            
+                            logger.info('(%s) Connection to Server Completed', self._system)
+
                     else:
                         self._stats['CONNECTION'] = 'NO'
-                        logger.error('(%s) Master ACK Contained wrong ID - Connection Reset', self._system)
+                        logger.error('(%s) Server ACK Contained wrong ID - Connection Reset', self._system)
 
-                elif self._stats['CONNECTION'] == 'OPTIONS-SENT': # If we've sent out options to the master
+                elif self._stats['CONNECTION'] == 'OPTIONS-SENT': # If we've sent out options to the server
                     _peer_id = _data[6:10]
                     if self._config['LOOSE'] or _peer_id == self._config['RADIO_ID']: # Validate the Radio_ID unless using loose validation
                         logger.info('(%s) Repeater Options Accepted', self._system)
                         self._stats['CONNECTION'] = 'YES'
                         self._stats['CONNECTED'] = time()
-                        logger.info('(%s) Connection to Master Completed with options', self._system)
+                        logger.info('(%s) Connection to Server Completed with options', self._system)
                     else:
                         self._stats['CONNECTION'] = 'NO'
-                        logger.error('(%s) Master ACK Contained wrong ID - Connection Reset', self._system)
+                        logger.error('(%s) Server ACK Contained wrong ID - Connection Reset', self._system)
 
-            elif _command == MSTP:    # Actually MSTPONG -- a reply to RPTPING (send by peer)
+            elif _command == MSTP:    # Actually MSTPONG -- a reply to RPTPING (sent by outbound client)
                 _peer_id = _data[7:11]
                 if self._config['LOOSE'] or _peer_id == self._config['RADIO_ID']: # Validate the Radio_ID unless using loose validation
                     self._stats['PING_OUTSTANDING'] = False
@@ -709,7 +710,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     self._stats['PINGS_ACKD'] += 1
                     logger.debug('(%s) MSTPONG Received. Pongs Since Connected: %s', self._system, self._stats['PINGS_ACKD'])
 
-            elif _command == MSTC:    # Actually MSTCL -- notify us the master is closing down
+            elif _command == MSTC:    # Actually MSTCL -- notify us the server is closing down
                 _peer_id = _data[5:9]
                 if self._config['LOOSE'] or _peer_id == self._config['RADIO_ID']: # Validate the Radio_ID unless using loose validation
                     self._stats['CONNECTION'] = 'NO'
@@ -766,12 +767,12 @@ def json_systems(_systems):
     for name, c in _systems.items():
         mode = c['MODE']
         view = {'MODE': mode, 'ENABLED': c['ENABLED']}
-        if mode == 'MASTER':
+        if mode == 'SERVER':
             view['REPEAT'] = c.get('REPEAT', False)
-            view['MAX_PEERS'] = c.get('MAX_PEERS')
-            peers = {}
-            for pid, p in c['PEERS'].items():
-                peers[str(int_id(pid))] = {
+            view['MAX_REPEATERS'] = c.get('MAX_REPEATERS')
+            repeaters = {}
+            for pid, p in c['REPEATERS'].items():
+                repeaters[str(int_id(pid))] = {
                     'RADIO_ID':   int_id(pid),
                     'CALLSIGN':   s(p.get('CALLSIGN', '')),
                     'LOCATION':   s(p.get('LOCATION', '')),
@@ -784,15 +785,15 @@ def json_systems(_systems):
                     'COLORCODE':  s(p.get('COLORCODE', '')),
                     'SLOTS':      s(p.get('SLOTS', '')),
                 }
-            view['PEERS'] = peers
-        elif mode == 'PEER':
+            view['REPEATERS'] = repeaters
+        elif mode == 'OUTBOUND':
             stats = c.get('STATS', {})
             view.update({
                 'RADIO_ID':    int_id(c['RADIO_ID']),
                 'CALLSIGN':     s(c['CALLSIGN']),
                 'LOCATION':     s(c['LOCATION']),
-                'MASTER_IP':    c['MASTER_IP'],
-                'MASTER_PORT':  c['MASTER_PORT'],
+                'SERVER_IP':    c['SERVER_IP'],
+                'SERVER_PORT':  c['SERVER_PORT'],
                 'SLOTS':        s(c['SLOTS']),
                 'STATS': {
                     'CONNECTION': stats.get('CONNECTION', ''),

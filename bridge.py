@@ -124,8 +124,8 @@ def config_reports(_config, _factory):
 
 
 # Import Bridging rules
-# Note: A stanza *must* exist for any MASTER or CLIENT configured in the main
-# configuration file and listed as "active". It can be empty,
+# Note: A stanza *must* exist for any SERVER or OUTBOUND system configured in
+# the main configuration file and listed as "active". It can be empty,
 # but it has to exist.
 def make_bridges(_rules):
     # Convert integer GROUP ID numbers from the config into hex strings
@@ -217,7 +217,7 @@ def stream_trimmer_loop():
     _now = time()
 
     for system in systems:
-        # HBP systems, master and peer
+        # HBP systems, server and outbound
         if CONFIG['SYSTEMS'][system]['MODE'] != 'OPENBRIDGE':
             for slot in range(1,3):
                 _slot  = systems[system].STATUS[slot]
@@ -727,9 +727,9 @@ class routerHBP(HBSYSTEM):
     def bridge_group(self, _src, _bridge, _target, _src_ts, _src_lc, _ber_rssi,
                      _peer_id, _rf_src, _dst_id, _stream_id, _slot,
                      _frame_type, _dtype_vseq, _data, _pkt_time):
-        # If this target is a PEER not logged into its upstream master, don't
-        # forward -- the frames would just be dropped there, and it would falsely
-        # show as an active call/forward on the dashboard.
+        # If this target is an OUTBOUND client not logged into its upstream server,
+        # don't forward -- the frames would just be dropped there, and it would
+        # falsely show as an active call/forward on the dashboard.
         if not self.egress_ready():
             return
         _bits = _data[15]
@@ -866,7 +866,7 @@ class routerHBP(HBSYSTEM):
     # checks are active for unit calls (the group-hangtime checks are disabled).
     def bridge_unit(self, _src, _peer_id, _rf_src, _dst_id, _stream_id, _slot,
                     _frame_type, _dtype_vseq, _data, _pkt_time):
-        # Don't forward to a PEER that isn't logged into its upstream master.
+        # Don't forward to an OUTBOUND client that isn't logged into its upstream server.
         if not self.egress_ready():
             return
         _target_status = self.STATUS

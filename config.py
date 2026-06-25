@@ -54,8 +54,8 @@ def process_acls(_config):
 
     # System level ACLs
     for system in _config['SYSTEMS']:
-        # Registration ACLs (which make no sense for peer systems)
-        if _config['SYSTEMS'][system]['MODE'] == 'MASTER':
+        # Registration ACLs (which make no sense for outbound systems)
+        if _config['SYSTEMS'][system]['MODE'] == 'SERVER':
             _config['SYSTEMS'][system]['REG_ACL'] = acl_build(_config['SYSTEMS'][system]['REG_ACL'], const.PEER_MAX)
 
         # Subscriber and TGID ACLs (valid for all system types)
@@ -171,16 +171,16 @@ def build_config(_config_file):
                 })
 
             elif config.getboolean(section, 'ENABLED'):
-                if config.get(section, 'MODE') == 'PEER':
+                if config.get(section, 'MODE') == 'OUTBOUND':
                     CONFIG['SYSTEMS'].update({section: {
                         'MODE': config.get(section, 'MODE'),
                         'ENABLED': config.getboolean(section, 'ENABLED'),
                         'LOOSE': config.getboolean(section, 'LOOSE'),
                         'IP': getaddrinfo(config.get(section, 'IP'), 0)[0][4][0],
                         'PORT': config.getint(section, 'PORT'),
-                        'MASTER_SOCKADDR': getaddrinfo(config.get(section, 'MASTER_IP'), config.getint(section, 'MASTER_PORT'), proto=17)[0][4],
-                        'MASTER_IP': getaddrinfo(config.get(section, 'MASTER_IP'), 0)[0][4][0],
-                        'MASTER_PORT': config.getint(section, 'MASTER_PORT'),
+                        'SERVER_SOCKADDR': getaddrinfo(config.get(section, 'SERVER_IP'), config.getint(section, 'SERVER_PORT'), proto=17)[0][4],
+                        'SERVER_IP': getaddrinfo(config.get(section, 'SERVER_IP'), 0)[0][4][0],
+                        'SERVER_PORT': config.getint(section, 'SERVER_PORT'),
                         'PASSPHRASE': bytes(config.get(section, 'PASSPHRASE'), 'utf-8'),
                         'CALLSIGN': bytes(config.get(section, 'CALLSIGN').ljust(8)[:8], 'utf-8'),
                         'RADIO_ID': config.getint(section, 'RADIO_ID').to_bytes(4, 'big'),
@@ -215,12 +215,12 @@ def build_config(_config_file):
                         'LAST_PING_ACK_TIME': 0,
                     }})
 
-                elif config.get(section, 'MODE') == 'MASTER':
+                elif config.get(section, 'MODE') == 'SERVER':
                     CONFIG['SYSTEMS'].update({section: {
                         'MODE': config.get(section, 'MODE'),
                         'ENABLED': config.getboolean(section, 'ENABLED'),
                         'REPEAT': config.getboolean(section, 'REPEAT'),
-                        'MAX_PEERS': config.getint(section, 'MAX_PEERS'),
+                        'MAX_REPEATERS': config.getint(section, 'MAX_REPEATERS'),
                         'IP': getaddrinfo(config.get(section, 'IP'), 0)[0][4][0],
                         'PORT': config.getint(section, 'PORT'),
                         'PASSPHRASE': bytes(config.get(section, 'PASSPHRASE'), 'utf-8'),
@@ -231,7 +231,7 @@ def build_config(_config_file):
                         'TG1_ACL': config.get(section, 'TGID_TS1_ACL'),
                         'TG2_ACL': config.get(section, 'TGID_TS2_ACL')
                     }})
-                    CONFIG['SYSTEMS'][section].update({'PEERS': {}})
+                    CONFIG['SYSTEMS'][section].update({'REPEATERS': {}})
                     
                 elif config.get(section, 'MODE') == 'OPENBRIDGE':
                     CONFIG['SYSTEMS'].update({section: {
