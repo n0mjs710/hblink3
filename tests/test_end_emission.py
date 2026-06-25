@@ -122,5 +122,23 @@ class TestGroupEnd(unittest.TestCase):
         self.assertEqual(len(_ends(rpt)), 1)          # exactly one, not two
 
 
+class TestCollisionLogging(unittest.TestCase):
+
+    def test_collision_logged_once_per_stream(self):
+        """A contending stream is reported once, not once per colliding frame."""
+        w, _ = _world()
+        owner = b'\x00\x00\x00\x10'
+        w.feed_group_header('MASTER-1', stream_id=owner, **_KW)
+        w.feed_group_burst('MASTER-1', 1, stream_id=owner, **_KW)
+        collider = dict(_KW, rf_src=bytes_3(312999))   # different subscriber
+        cid = b'\x00\x00\x00\x11'
+        with self.assertLogs('bridge', level='WARNING') as cm:
+            w.feed_group_header('MASTER-1', stream_id=cid, **collider)
+            w.feed_group_burst('MASTER-1', 1, stream_id=cid, **collider)
+            w.feed_group_burst('MASTER-1', 2, stream_id=cid, **collider)
+        hits = [m for m in cm.output if 'collided with existing call' in m]
+        self.assertEqual(len(hits), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

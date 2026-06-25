@@ -522,6 +522,9 @@ class routerHBP(HBSYSTEM):
                 # sentinel drops the END of any stream whose last burst was vseq 2.
                 'RX_TERMINATED': True,
                 'TX_TERMINATED': True,
+                # Last stream-id we logged a slot collision for, so a contending
+                # stream is reported once -- not once per colliding frame.
+                'RX_COLLISION_SID': b'\x00',
                 'RX_CT':        'GROUP VOICE',
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
@@ -555,6 +558,9 @@ class routerHBP(HBSYSTEM):
                 # sentinel drops the END of any stream whose last burst was vseq 2.
                 'RX_TERMINATED': True,
                 'TX_TERMINATED': True,
+                # Last stream-id we logged a slot collision for, so a contending
+                # stream is reported once -- not once per colliding frame.
+                'RX_COLLISION_SID': b'\x00',
                 'RX_CT':        'GROUP VOICE',
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
@@ -598,7 +604,9 @@ class routerHBP(HBSYSTEM):
         # Is this a new call stream?
         if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
             if (not self.STATUS[_slot]['RX_TERMINATED']) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
-                logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> TGID %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
+                if self.STATUS[_slot]['RX_COLLISION_SID'] != _stream_id:
+                    self.STATUS[_slot]['RX_COLLISION_SID'] = _stream_id
+                    logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> TGID %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
                 return
 
             # A new stream is taking the slot: end any prior un-terminated stream first
@@ -793,7 +801,9 @@ class routerHBP(HBSYSTEM):
             
             # Collision in progress, bail out!
             if (not self.STATUS[_slot]['RX_TERMINATED']) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
-                logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> UNIT %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
+                if self.STATUS[_slot]['RX_COLLISION_SID'] != _stream_id:
+                    self.STATUS[_slot]['RX_COLLISION_SID'] = _stream_id
+                    logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> UNIT %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
                 return
                 
             # A new stream is taking the slot: end any prior un-terminated stream first
