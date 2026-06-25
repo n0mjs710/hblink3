@@ -727,6 +727,11 @@ class routerHBP(HBSYSTEM):
     def bridge_group(self, _src, _bridge, _target, _src_ts, _src_lc, _ber_rssi,
                      _peer_id, _rf_src, _dst_id, _stream_id, _slot,
                      _frame_type, _dtype_vseq, _data, _pkt_time):
+        # If this target is a PEER not logged into its upstream master, don't
+        # forward -- the frames would just be dropped there, and it would falsely
+        # show as an active call/forward on the dashboard.
+        if not self.egress_ready():
+            return
         _bits = _data[15]
         _dmrpkt = _data[20:53]
         _target_status = self.STATUS
@@ -861,6 +866,9 @@ class routerHBP(HBSYSTEM):
     # checks are active for unit calls (the group-hangtime checks are disabled).
     def bridge_unit(self, _src, _peer_id, _rf_src, _dst_id, _stream_id, _slot,
                     _frame_type, _dtype_vseq, _data, _pkt_time):
+        # Don't forward to a PEER that isn't logged into its upstream master.
+        if not self.egress_ready():
+            return
         _target_status = self.STATUS
         if (_dst_id == _target_status[_slot]['RX_TGID']) and ((_pkt_time - _target_status[_slot]['RX_TIME']) < STREAM_TO):
             if _src.should_log_contention(_stream_id, _slot, _frame_type, _dtype_vseq):

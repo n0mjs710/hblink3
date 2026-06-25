@@ -109,6 +109,11 @@ class World:
                 obj = bridge.routerOBP(name, self.CONFIG, None)
             else:
                 obj = bridge.routerHBP(name, self.CONFIG, None)
+                # The router only forwards to a PEER once it has logged into its
+                # upstream master; the harness models connected, participating
+                # systems, so mark peers as connected.
+                if mode == 'PEER':
+                    obj._stats['CONNECTION'] = 'YES'
             # Capture what the routing core hands to each system to transmit,
             # instead of writing to a real UDP transport.
             obj.send_system = self._make_capture(name)

@@ -303,8 +303,21 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
         #logger.debug('(%s) TX Packet to %s on port %s: %s', self._peers[_peer]['RADIO_ID'], self._peers[_peer]['IP'], self._peers[_peer]['PORT'], ahex(_packet))
 
+    # Whether this system can currently deliver bridged call traffic. A PEER can
+    # only forward to its upstream master once it has finished logging in; masters
+    # and OpenBridges are always ready (their own send paths fan out to whatever
+    # is actually connected). Used by the router to skip dead targets.
+    def egress_ready(self):
+        if self._config['MODE'] == 'PEER':
+            return self._stats['CONNECTION'] == 'YES'
+        return True
+
     def send_master(self, _packet):
         if _packet[:4] == DMRD:
+            # Don't push call traffic to the upstream master until we're logged
+            # in -- it would only be dropped. Login/keepalive packets still flow.
+            if self._stats['CONNECTION'] != 'YES':
+                return
             _packet = b''.join([_packet[:11], self._config['RADIO_ID'], _packet[15:]])
         self.transport.sendto(_packet, self._config['MASTER_SOCKADDR'])
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!

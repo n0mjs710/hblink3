@@ -179,10 +179,23 @@ class TestTransportSend(unittest.TestCase):
         peer = hblink.HBSYSTEM('REPEATER-1', CFG, None)
         peer.transport = MockDatagramTransport()
         pkt = DMRD + b'\x00' + b'\x11\x22\x33' + b'\x00\x00\x09' + b'\xaa\xbb\xcc\xdd' + b'\x00' + b'\x00\x00\x00\x01' + b'\x00' * 33
+        # A logged-in peer sends call traffic to its master via sendto.
+        peer._stats['CONNECTION'] = 'YES'
         peer.send_master(pkt)
         self.assertEqual(len(peer.transport.sent), 1)
         _, addr = peer.transport.sent[0]
         self.assertEqual(addr, CFG['SYSTEMS']['REPEATER-1']['MASTER_SOCKADDR'])
+
+    def test_peer_send_master_drops_dmrd_when_not_connected(self):
+        peer = hblink.HBSYSTEM('REPEATER-1', CFG, None)
+        peer.transport = MockDatagramTransport()
+        peer._stats['CONNECTION'] = 'NO'
+        pkt = DMRD + b'\x00' + b'\x11\x22\x33' + b'\x00\x00\x09' + b'\xaa\xbb\xcc\xdd' + b'\x00' + b'\x00\x00\x00\x01' + b'\x00' * 33
+        peer.send_master(pkt)
+        self.assertEqual(peer.transport.sent, [])          # call traffic dropped
+        # but login/keepalive packets still go out
+        peer.send_master(RPTL + b'\x00\x00\x00\x01')
+        self.assertEqual(len(peer.transport.sent), 1)
 
 
 class TestSupersessionEnd(unittest.TestCase):
