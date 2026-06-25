@@ -21,6 +21,9 @@ full-table refreshes, and no pickle on the wire.
   connected/disconnected state, timeout countdown, and on/off trigger talkgroups.
 - **Call Log** — a running log of call starts and ends.
 
+For a field-by-field explanation of everything on the screen, see
+[FIELDS.md](FIELDS.md).
+
 ## Install
 
 ```bash

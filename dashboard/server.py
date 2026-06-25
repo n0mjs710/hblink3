@@ -27,7 +27,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import uvicorn
 
 from dmr_utils3.utils import mk_id_dict, get_alias
@@ -219,6 +219,10 @@ async def index():
     with open(os.path.join(STATIC, 'dashboard.html'), encoding='utf-8') as f:
         html = f.read()
     return html.replace('{{REPORT_NAME}}', REPORT_NAME)
+
+@app.get('/logo.png')
+async def logo():
+    return FileResponse(os.path.join(STATIC, 'HBlink.png'), media_type='image/png')
 
 @app.get('/api/state')
 async def api_state():

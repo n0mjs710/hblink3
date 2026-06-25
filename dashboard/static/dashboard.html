@@ -15,6 +15,8 @@
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);padding:14px;font-size:13px}
   .wrap{max-width:1600px;margin:0 auto}
   header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .logo{height:46px;width:auto;display:block}
   h1{color:var(--accent);font-size:24px;font-weight:600}
   h1 small{color:var(--muted);font-size:14px;font-weight:400;margin-left:8px}
   .badge{padding:6px 14px;border-radius:6px;font-weight:600;font-size:13px;border:1px solid var(--border)}
@@ -50,7 +52,10 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>{{REPORT_NAME}}<small>HBlink3 Monitor</small></h1>
+    <div class="brand">
+      <img src="/logo.png" alt="HBlink" class="logo">
+      <h1>{{REPORT_NAME}}<small>HBlink3 Monitor</small></h1>
+    </div>
     <div id="conn" class="badge down">HBlink: connecting…</div>
   </header>
 
