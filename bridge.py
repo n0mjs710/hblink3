@@ -212,7 +212,8 @@ def rule_timer_loop():
 
 # run this every 10 seconds to trim orphaned stream ids
 def stream_trimmer_loop():
-    logger.debug('(ROUTER) Trimming inactive stream IDs from system lists')
+    # Runs once a second -- intentionally silent per-pass; it only logs when it
+    # actually times out a stream.
     _now = time()
 
     for system in systems:
