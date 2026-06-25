@@ -223,14 +223,14 @@ def stream_trimmer_loop():
                 _slot  = systems[system].STATUS[slot]
 
                 # RX slot check -- time out a stream with no audio for STREAM_TIMEOUT
-                if _slot['RX_TYPE'] != HBPF_SLT_VTERM and _slot['RX_TIME'] <  _now - STREAM_TIMEOUT:
+                if not _slot['RX_TERMINATED'] and _slot['RX_TIME'] <  _now - STREAM_TIMEOUT:
                     logger.info('(%s) *TIME OUT*  RX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f', \
                         system, int_id(_slot['RX_STREAM_ID']), int_id(_slot['RX_RFS']), int_id(_slot['RX_TGID']), slot, _slot['RX_TIME'] - _slot['RX_START'])
                     systems[system]._end_slot_stream(slot)
 
                 # TX slot check
-                if _slot['TX_TYPE'] != HBPF_SLT_VTERM and _slot['TX_TIME'] <  _now - STREAM_TIMEOUT:
-                    _slot['TX_TYPE'] = HBPF_SLT_VTERM
+                if not _slot['TX_TERMINATED'] and _slot['TX_TIME'] <  _now - STREAM_TIMEOUT:
+                    _slot['TX_TERMINATED'] = True
                     logger.info('(%s) *TIME OUT*  TX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f', \
                         system, int_id(_slot['TX_STREAM_ID']), int_id(_slot['TX_RFS']), int_id(_slot['TX_TGID']), slot, _slot['TX_TIME'] - _slot['TX_START'])
                     if CONFIG['REPORTS']['REPORT']:
@@ -516,6 +516,12 @@ class routerHBP(HBSYSTEM):
                 'TX_TIME':      time(),
                 'RX_TYPE':      HBPF_SLT_VTERM,
                 'TX_TYPE':      HBPF_SLT_VTERM,
+                # Explicit "stream has ended" flags. RX_/TX_TYPE hold the last
+                # frame's _dtype_vseq, which for voice bursts cycles 0..5 and so
+                # collides with HBPF_SLT_VTERM (==2) -- using it as the terminated
+                # sentinel drops the END of any stream whose last burst was vseq 2.
+                'RX_TERMINATED': True,
+                'TX_TERMINATED': True,
                 'RX_CT':        'GROUP VOICE',
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
@@ -543,6 +549,12 @@ class routerHBP(HBSYSTEM):
                 'TX_TIME':      time(),
                 'RX_TYPE':      HBPF_SLT_VTERM,
                 'TX_TYPE':      HBPF_SLT_VTERM,
+                # Explicit "stream has ended" flags. RX_/TX_TYPE hold the last
+                # frame's _dtype_vseq, which for voice bursts cycles 0..5 and so
+                # collides with HBPF_SLT_VTERM (==2) -- using it as the terminated
+                # sentinel drops the END of any stream whose last burst was vseq 2.
+                'RX_TERMINATED': True,
+                'TX_TERMINATED': True,
                 'RX_CT':        'GROUP VOICE',
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
@@ -563,9 +575,9 @@ class routerHBP(HBSYSTEM):
     # already ended cleanly. Used by both the new-stream path and the trimmer.
     def _end_slot_stream(self, _slot):
         st = self.STATUS[_slot]
-        if st['RX_TYPE'] == HBPF_SLT_VTERM:
+        if st['RX_TERMINATED']:
             return
-        st['RX_TYPE'] = HBPF_SLT_VTERM
+        st['RX_TERMINATED'] = True
         if CONFIG['REPORTS']['REPORT'] and self._report:
             duration = st['RX_TIME'] - st['RX_START']
             self._report.send_bridgeEvent('{},END,RX,{},{},{},{},{},{},{:.2f}'.format(
@@ -585,7 +597,7 @@ class routerHBP(HBSYSTEM):
 
         # Is this a new call stream?
         if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
-            if (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
+            if (not self.STATUS[_slot]['RX_TERMINATED']) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
                 logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> TGID %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
                 return
 
@@ -594,6 +606,7 @@ class routerHBP(HBSYSTEM):
 
             # This is a new call stream
             self.STATUS[_slot]['RX_START'] = pkt_time
+            self.STATUS[_slot]['RX_TERMINATED'] = False
             self.STATUS[_slot]['RX_CT'] = 'GROUP VOICE'
             logger.info('(%s) *GROUP CALL START* STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot)
@@ -624,7 +637,8 @@ class routerHBP(HBSYSTEM):
 
 
         # Final actions - Is this a voice terminator?
-        if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM):
+        if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (not self.STATUS[_slot]['RX_TERMINATED']):
+            self.STATUS[_slot]['RX_TERMINATED'] = True
             call_duration = pkt_time - self.STATUS[_slot]['RX_START']
             logger.info('(%s) *GROUP CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s, Duration: %.2f', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, call_duration)
@@ -731,6 +745,7 @@ class routerHBP(HBSYSTEM):
         # Is this a new call stream on the target slot?
         if (_target_status[_ts]['TX_STREAM_ID'] != _stream_id):
             _target_status[_ts]['TX_START'] = _pkt_time
+            _target_status[_ts]['TX_TERMINATED'] = False
             _target_status[_ts]['TX_TGID'] = _target['TGID']
             _target_status[_ts]['TX_STREAM_ID'] = _stream_id
             _target_status[_ts]['TX_RFS'] = _rf_src
@@ -754,10 +769,12 @@ class routerHBP(HBSYSTEM):
             _tmp_bits = _bits
         _tmp_data = b''.join([_data[:8], _target['TGID'], _data[11:15], _tmp_bits.to_bytes(1, 'big'), _data[16:20]])
         _dmrpkt = embed_lc(_dmrpkt, _frame_type, _dtype_vseq, _target_status[_ts]['TX_H_LC'], _target_status[_ts]['TX_T_LC'], _target_status[_ts]['TX_EMB_LC'])
-        # On the voice terminator, report the call end
-        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM and CONFIG['REPORTS']['REPORT']:
-            call_duration = _pkt_time - _target_status[_ts]['TX_START']
-            self._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _ts, int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
+        # On the voice terminator, mark the TX stream ended and report the call end
+        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM and not _target_status[_ts]['TX_TERMINATED']:
+            _target_status[_ts]['TX_TERMINATED'] = True
+            if CONFIG['REPORTS']['REPORT']:
+                call_duration = _pkt_time - _target_status[_ts]['TX_START']
+                self._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _ts, int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
         _tmp_data = b''.join([_tmp_data, _dmrpkt, _ber_rssi])
         self.send_system(_tmp_data)
 
@@ -775,7 +792,7 @@ class routerHBP(HBSYSTEM):
         if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
             
             # Collision in progress, bail out!
-            if (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
+            if (not self.STATUS[_slot]['RX_TERMINATED']) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
                 logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> UNIT %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
                 return
                 
@@ -795,6 +812,7 @@ class routerHBP(HBSYSTEM):
             
             # This is a new call stream, so log & report
             self.STATUS[_slot]['RX_START'] = pkt_time
+            self.STATUS[_slot]['RX_TERMINATED'] = False
             self.STATUS[_slot]['RX_CT'] = 'UNIT VOICE'
             logger.info('(%s) *UNIT CALL START* STREAM ID: %s SUB: %s (%s) PEER: %s (%s) UNIT: %s (%s), TS: %s, FORWARD: %s', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, self._targets)
@@ -808,7 +826,8 @@ class routerHBP(HBSYSTEM):
 
 
         # Final actions - Is this a voice terminator?
-        if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM):
+        if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (not self.STATUS[_slot]['RX_TERMINATED']):
+            self.STATUS[_slot]['RX_TERMINATED'] = True
             self._targets = []
             call_duration = pkt_time - self.STATUS[_slot]['RX_START']
             logger.info('(%s) *UNIT CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) UNIT %s (%s), TS %s, Duration: %.2f', \
@@ -845,6 +864,7 @@ class routerHBP(HBSYSTEM):
         # Record target information if this is a new call stream on the slot
         if (_target_status[_slot]['TX_STREAM_ID'] != _stream_id):
             _target_status[_slot]['TX_START'] = _pkt_time
+            _target_status[_slot]['TX_TERMINATED'] = False
             _target_status[_slot]['TX_TGID'] = _dst_id
             _target_status[_slot]['TX_STREAM_ID'] = _stream_id
             _target_status[_slot]['TX_RFS'] = _rf_src
@@ -852,6 +872,11 @@ class routerHBP(HBSYSTEM):
             logger.info('(%s) Unit call bridged to HBP System: %s TS: %s, UNIT: %s', _src._system, self._system, _slot, int_id(_dst_id))
             if CONFIG['REPORTS']['REPORT']:
                 self._report.send_bridgeEvent('UNIT VOICE,START,TX,{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id)).encode(encoding='utf-8', errors='ignore'))
+
+        # On the voice terminator, mark the TX stream ended so the stream-trimmer
+        # doesn't later synthesize a duplicate timeout END for a cleanly-ended call.
+        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM:
+            _target_status[_slot]['TX_TERMINATED'] = True
 
         # Set values for the contention handler to test on the next frame
         _target_status[_slot]['TX_TIME'] = _pkt_time

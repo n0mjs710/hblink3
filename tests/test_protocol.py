@@ -203,6 +203,7 @@ class TestSupersessionEnd(unittest.TestCase):
 
     def _activate(self, st, ct='GROUP VOICE'):
         st['RX_TYPE'] = HBPF_SLT_VHEAD          # an active (non-terminated) stream
+        st['RX_TERMINATED'] = False
         st['RX_CT'] = ct
         st['RX_STREAM_ID'] = bytes_4(12345)
         st['RX_PEER'] = bytes_4(312100)
@@ -216,7 +217,7 @@ class TestSupersessionEnd(unittest.TestCase):
         self._activate(r.STATUS[1])
         r._end_slot_stream(1)
         self.assertEqual(cap, ['GROUP VOICE,END,RX,MASTER-1,12345,312100,3120001,1,3100,4.20'])
-        self.assertEqual(r.STATUS[1]['RX_TYPE'], HBPF_SLT_VTERM)
+        self.assertTrue(r.STATUS[1]['RX_TERMINATED'])
         # idempotent: a second call (already terminated) emits nothing more
         r._end_slot_stream(1)
         self.assertEqual(len(cap), 1)
@@ -229,7 +230,7 @@ class TestSupersessionEnd(unittest.TestCase):
 
     def test_no_event_for_idle_slot(self):
         r, cap = self._router()
-        r._end_slot_stream(1)                   # slot starts terminated (RX_TYPE == VTERM)
+        r._end_slot_stream(1)                   # slot starts terminated (RX_TERMINATED == True)
         self.assertEqual(cap, [])
 
 
