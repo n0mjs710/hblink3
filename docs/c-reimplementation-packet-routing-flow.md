@@ -215,11 +215,15 @@ observed traffic and uses that information to make a forwarding decision. HBlink
 implementation of this mechanism is the reference for detailed behavior.
 
 The cache is updated once per call stream, on the voice header frame (the first DMRD packet
-of a new stream_id). The rf_src ID is recorded as having been last seen on the ingress
-system, and that entry's expiry timestamp is reset to current_time + TIMEOUT. Updating on
-subsequent frames of the same call is redundant — a subscriber's location cannot change
-mid-call — and would add unnecessary work to every packet on the hot path. This requires
-no explicit configuration; the cache builds itself from observed traffic.
+of a new stream_id). The update is unconditional: the rf_src ID is recorded as having been
+last seen on the ingress system, and that entry's expiry timestamp is reset to
+current_time + TIMEOUT. If an entry for that rf_src already exists pointing to a different
+system, it is overwritten with the new system. This handles subscriber roaming — a unit
+that moves from system A to system B between calls will have its cache entry updated to
+system B on its next transmission, regardless of whether the old entry has expired.
+Updating on subsequent frames of the same call is redundant — a subscriber's location
+cannot change mid-call — and would add unnecessary work to every packet on the hot path.
+This requires no explicit configuration; the cache builds itself from observed traffic.
 
 The cache must be pruned periodically or it will grow without bound as subscribers come and
 go. A pruning pass runs at a configured interval measured in minutes (not seconds), removing
