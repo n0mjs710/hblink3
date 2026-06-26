@@ -168,6 +168,7 @@ def rule_timer_loop():
     global UNIT_MAP
     logger.debug('(ROUTER) routerHBP Rule timer loop started')
     _now = time()
+    _changed = False
 
     for _bridge in BRIDGES:
         for _system in BRIDGES[_bridge]:
@@ -181,6 +182,7 @@ def rule_timer_loop():
                             logger.info('(ROUTER) Conference Bridge TIMEOUT deferred (call in progress): System: %s, Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
                         else:
                             _system['ACTIVE'] = False
+                            _changed = True
                             logger.info('(ROUTER) Conference Bridge TIMEOUT: DEACTIVATE System: %s, Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
                     else:
                         timeout_in = _system['TIMER'] - _now
@@ -191,6 +193,7 @@ def rule_timer_loop():
                 if _system['ACTIVE'] == False:
                     if _system['TIMER'] < _now:
                         _system['ACTIVE'] = True
+                        _changed = True
                         logger.info('(ROUTER) Conference Bridge TIMEOUT: ACTIVATE System: %s, Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
                     else:
                         timeout_in = _system['TIMER'] - _now
@@ -211,8 +214,9 @@ def rule_timer_loop():
 
     logger.debug('Removed unit(s) %s from UNIT_MAP', remove_list)
 
-    # Push refreshed bridge state to consumers after a rule-timer pass
-    if CONFIG['REPORTS']['REPORT'] and report_server:
+    # Push bridge state when something changed; the periodic reporting loop
+    # covers the rest so we don't need to send on every no-op pass.
+    if _changed and CONFIG['REPORTS']['REPORT'] and report_server:
         report_server.send_bridge()
 
 
@@ -1084,7 +1088,7 @@ if __name__ == '__main__':
                 logger.debug('(GLOBAL) %s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
 
         # Initialize the rule timer (user-activated stuff) and the stream trimmer
-        loop.create_task(run_periodic(60, rule_timer_loop, '(ROUTER) rule timer'))
+        loop.create_task(run_periodic(10, rule_timer_loop, '(ROUTER) rule timer'))
         loop.create_task(run_periodic(1, stream_trimmer_loop, '(ROUTER) stream trimmer'))
 
         await stop_event.wait()
