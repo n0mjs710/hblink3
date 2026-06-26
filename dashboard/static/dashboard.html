@@ -88,7 +88,7 @@ function activeBySlot(sys){ const r={1:null,2:null}; for(const k in ST.active){c
 function activeList(sys){ const a=[]; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) a.push(e);} return a; }
 
 function callCell(e, klass){
-  if(!e) return '<div class="call idle">— idle —</div>';
+  if(!e) return '<div class="call idle"><div class="call-top">— idle —</div><div class="sub mono">&nbsp;</div></div>';
   const src = e.src_alias ? esc(e.src_alias) : e.src;       // top line prefers the callsign/alias
   const dst = e.dst_alias ? esc(e.dst_alias) : e.dst;       // TGID name (group) or unit alias
   const d='<span class="js-dur" data-start="'+e._arrived+'">'+dur((Date.now()-e._arrived)/1000)+'</span>';
