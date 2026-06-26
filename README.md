@@ -68,7 +68,7 @@ destroyed during bridging.** Talker Alias occupies the same embedded LC slots
 (FLCO 0x04–0x07 in bursts B–E) that the bridge overwrites with the translated
 call LC. There is no way to preserve both simultaneously.
 
-This is worse when using an IPSC2/ipsc2hbp adapter. IPSC carries LC completely
+This is worse when using an IPSC/ipsc2hbp adapter. IPSC carries TA completely
 differently from DMR over-the-air; the adapter must reconstruct HBP frames from
 IPSC data, and any talker-alias LC embedded in those reconstructed frames cannot
 be assumed to match the DMR embedded-LC format that HBlink3 expects.
