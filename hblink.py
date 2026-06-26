@@ -708,6 +708,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     self._stats['PING_OUTSTANDING'] = False
                     self._stats['NUM_OUTSTANDING'] = 0
                     self._stats['PINGS_ACKD'] += 1
+                    self._stats['LAST_PING_ACK_TIME'] = time()
                     logger.debug('(%s) MSTPONG Received. Pongs Since Connected: %s', self._system, self._stats['PINGS_ACKD'])
 
             elif _command == MSTC:    # Actually MSTCL -- notify us the server is closing down
@@ -796,9 +797,10 @@ def json_systems(_systems):
                 'SERVER_PORT':  c['SERVER_PORT'],
                 'SLOTS':        s(c['SLOTS']),
                 'STATS': {
-                    'CONNECTION':      stats.get('CONNECTION', ''),
-                    'CONNECTED':       stats.get('CONNECTED', 0),
-                    'NUM_OUTSTANDING': stats.get('NUM_OUTSTANDING', 0),
+                    'CONNECTION':          stats.get('CONNECTION', ''),
+                    'CONNECTED':           stats.get('CONNECTED', 0),
+                    'NUM_OUTSTANDING':     stats.get('NUM_OUTSTANDING', 0),
+                    'LAST_PING_ACK_TIME':  stats.get('LAST_PING_ACK_TIME', 0),
                 },
             })
         elif mode == 'OPENBRIDGE':

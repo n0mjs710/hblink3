@@ -114,8 +114,6 @@ def enrich_config(systems):
         if sysview['MODE'] == 'SERVER':
             for p in sysview.get('REPEATERS', {}).values():
                 p['connected_secs'] = int(max(0, now - p.get('CONNECTED', now)))
-                last_ping = p.get('LAST_PING', 0)
-                p['last_ping_secs'] = int(max(0, now - last_ping)) if last_ping else None
         elif sysview['MODE'] == 'OUTBOUND':
             c = sysview.get('STATS', {}).get('CONNECTED')
             sysview['STATS']['connected_secs'] = int(max(0, now - c)) if c else None
