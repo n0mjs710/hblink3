@@ -780,9 +780,9 @@ def json_systems(_systems):
                     'PORT':       p.get('PORT', ''),
                     'CONNECTED':  p.get('CONNECTED', 0),
                     'CONNECTION': p.get('CONNECTION', ''),
+                    'LAST_PING':  p.get('LAST_PING', 0),
                     'RX_FREQ':    s(p.get('RX_FREQ', '')),
                     'TX_FREQ':    s(p.get('TX_FREQ', '')),
-                    'COLORCODE':  s(p.get('COLORCODE', '')),
                     'SLOTS':      s(p.get('SLOTS', '')),
                 }
             view['REPEATERS'] = repeaters
@@ -796,10 +796,9 @@ def json_systems(_systems):
                 'SERVER_PORT':  c['SERVER_PORT'],
                 'SLOTS':        s(c['SLOTS']),
                 'STATS': {
-                    'CONNECTION': stats.get('CONNECTION', ''),
-                    'CONNECTED':  stats.get('CONNECTED', 0),
-                    'PINGS_SENT': stats.get('PINGS_SENT', 0),
-                    'PINGS_ACKD': stats.get('PINGS_ACKD', 0),
+                    'CONNECTION':      stats.get('CONNECTION', ''),
+                    'CONNECTED':       stats.get('CONNECTED', 0),
+                    'NUM_OUTSTANDING': stats.get('NUM_OUTSTANDING', 0),
                 },
             })
         elif mode == 'OPENBRIDGE':
@@ -836,7 +835,12 @@ class reportFactory:
         _client.send_raw((json.dumps(_obj) + '\n').encode('utf-8'))
 
     def config_event(self):
-        return {'type': 'config', 'systems': json_systems(self._config['SYSTEMS'])}
+        return {
+            'type': 'config',
+            'systems': json_systems(self._config['SYSTEMS']),
+            'ping_time': self._config['GLOBAL'].get('PING_TIME', 5),
+            'max_missed': self._config['GLOBAL'].get('MAX_MISSED', 3),
+        }
 
     def send_config(self):
         self.send_clients(self.config_event())

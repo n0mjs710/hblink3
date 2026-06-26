@@ -87,6 +87,8 @@ class State:
         self.log = deque(maxlen=LOG_LINES)
         self.hblink = False
         self.clients = set()              # connected dashboard WebSockets
+        self.ping_time = 5                # PING_TIME from hblink global config
+        self.max_missed = 3               # MAX_MISSED from hblink global config
 
 STATE = State()
 
@@ -112,6 +114,8 @@ def enrich_config(systems):
         if sysview['MODE'] == 'SERVER':
             for p in sysview.get('REPEATERS', {}).values():
                 p['connected_secs'] = int(max(0, now - p.get('CONNECTED', now)))
+                last_ping = p.get('LAST_PING', 0)
+                p['last_ping_secs'] = int(max(0, now - last_ping)) if last_ping else None
         elif sysview['MODE'] == 'OUTBOUND':
             c = sysview.get('STATS', {}).get('CONNECTED')
             sysview['STATS']['connected_secs'] = int(max(0, now - c)) if c else None
@@ -142,8 +146,11 @@ async def broadcast(obj):
 async def handle_event(evt):
     t = evt.get('type')
     if t == 'config':
+        STATE.ping_time = evt.get('ping_time', STATE.ping_time)
+        STATE.max_missed = evt.get('max_missed', STATE.max_missed)
         STATE.systems = enrich_config(evt['systems'])
-        await broadcast({'type': 'config', 'systems': STATE.systems})
+        await broadcast({'type': 'config', 'systems': STATE.systems,
+                         'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed})
     elif t == 'bridges':
         STATE.bridges = enrich_bridges(evt['bridges'])
         await broadcast({'type': 'bridges', 'bridges': STATE.bridges})
@@ -236,6 +243,8 @@ def current_state():
         'bridges': STATE.bridges,
         'streams': list(STATE.streams.values()),
         'log': list(STATE.log),
+        'ping_time': STATE.ping_time,
+        'max_missed': STATE.max_missed,
     }
 
 @app.websocket('/ws')

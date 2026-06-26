@@ -9,7 +9,7 @@
     --bg:#0f172a; --panel:#1e293b; --panel2:#172033; --border:#334155;
     --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
     --green:#16a34a; --green-bg:#16351f; --red:#dc2626; --red-bg:#3a1620;
-    --orange:#ea580c; --orange-bg:#3a2412;
+    --orange:#ea580c; --orange-bg:#3a2412; --warn:#fbbf24;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);padding:14px;font-size:13px}
@@ -68,7 +68,7 @@
 </div>
 
 <script>
-const ST = { systems:{}, bridges:{}, active:{}, log:[], hblink:false };
+const ST = { systems:{}, bridges:{}, active:{}, log:[], hblink:false, ping_time:5, max_missed:3 };
 const STALE = 30000;   // drop an active call this many ms after START if no END arrives
 
 // ---------- helpers ----------
@@ -80,6 +80,7 @@ function dur(secs){
   if(d) return d+'d '+h+'h'; if(h) return h+'h '+m+'m'; if(m) return m+'m '+s+'s'; return s+'s';
 }
 const skey = e => e.system+'|'+e.slot+'|'+e.stream_id;
+function fmtSlots(s){ return s==='3'||s===3?'Both':s==='1'||s===1?'TS1':s==='2'||s===2?'TS2':esc(String(s||'')); }
 const idName = (name,id)=> name ? esc(name)+' <span class="sub mono">('+id+')</span>' : '<span class="mono">'+id+'</span>';
 const callShort = ct => ct==='GROUP VOICE'?'Group':ct==='UNIT VOICE'?'Unit':esc(ct);
 
@@ -108,7 +109,7 @@ function renderServers(){
     const m=ST.systems[n], repeaters=m.REPEATERS||{}, act=activeBySlot(n);
     const pids=Object.keys(repeaters);
     h+='<h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' repeater(s)</span></h3>';
-    h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>CC / Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+    h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
     if(!pids.length) h+='<tr><td colspan="6" class="sub">No repeaters connected</td></tr>';
     for(const pid of pids){
       const p=repeaters[pid];
@@ -117,9 +118,11 @@ function renderServers(){
         // TX (red) for the others, which are hearing the repeated traffic.
         return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx'); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
-      h+='<tr><td class="sysname">'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
+      const warn = p.last_ping_secs != null && p.last_ping_secs > ST.ping_time;
+      const csStyle = warn ? ' style="color:var(--warn)"' : '';
+      h+='<tr><td class="sysname"'+csStyle+'>'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
          '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+
-         '<td class="mono sub">'+freq+'</td><td class="mono">CC '+esc(p.COLORCODE)+'<div class="sub">slots '+esc(p.SLOTS)+'</div></td>'+
+         '<td class="mono sub">'+freq+'</td><td class="mono">'+fmtSlots(p.SLOTS)+'</td>'+
          '<td>'+cell(1)+'</td><td>'+cell(2)+'</td></tr>';
     }
     h+='</table>';
@@ -131,16 +134,17 @@ function fmtFreq(f){ return f && f.length>=7 ? (f.slice(0,3)+'.'+f.slice(3,7)) :
 function renderOutbounds(){
   const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='OUTBOUND');
   if(!names.length){ el('outbounds').innerHTML='<div class="empty">No outbound systems</div>'; return; }
-  let h='<table><tr><th>System</th><th>Identity</th><th>Connection</th><th>Pings S/A/L</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+  let h='<table><tr><th>System</th><th>Identity</th><th>Connection</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
   for(const n of names){
     const s=ST.systems[n], st=s.STATS||{}, act=activeBySlot(n);
     const up = st.CONNECTION==='YES';
-    const pings = (st.PINGS_SENT||0)+' / '+(st.PINGS_ACKD||0)+' / '+((st.PINGS_SENT||0)-(st.PINGS_ACKD||0));
+    const warn = (st.NUM_OUTSTANDING||0) > 0;
+    const nameStyle = warn ? ' style="color:var(--warn)"' : '';
     const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
-    h+='<tr><td class="sysname">'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
+    h+='<tr><td class="sysname"'+nameStyle+'>'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
        '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
        '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+esc(st.CONNECTION||'NO')+'</span><div class="sub">up '+since+'</div></td>'+
-       '<td class="mono sub">'+pings+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
+       '<td class="mono">'+fmtSlots(s.SLOTS)+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
   }
   el('outbounds').innerHTML=h+'</table>';
 }
@@ -222,10 +226,13 @@ function connect(){
   sock.onmessage=ev=>{
     const m=JSON.parse(ev.data);
     if(m.type==='initial'){ setConn(m.hblink); ST.systems=m.systems||{}; ST.bridges=m.bridges||{};
+      if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed;
       ST.active={}; (m.streams||[]).forEach(s=>{s._arrived=Date.now(); ST.active[skey(s)]=s;});
       ST.log=(m.log||[]).map(e=>{e._arrived=e._arrived||Date.now();return e;}); renderAll(); }
     else if(m.type==='hblink'){ setConn(m.connected); if(!m.connected){ST.systems={};ST.bridges={};ST.active={};renderAll();} }
-    else if(m.type==='config'){ ST.systems=m.systems||{}; renderServers(); renderOutbounds(); renderOpenbridges(); }
+    else if(m.type==='config'){ ST.systems=m.systems||{};
+      if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed;
+      renderServers(); renderOutbounds(); renderOpenbridges(); }
     else if(m.type==='bridges'){ ST.bridges=m.bridges||{}; renderBridges(); }
     else if(m.type==='stream'){ applyStream(m); }
   };
