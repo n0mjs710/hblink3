@@ -175,7 +175,8 @@ def rule_timer_loop():
                 if _system['ACTIVE'] == True:
                     if _system['TIMER'] < _now:
                         sys_obj = systems.get(_system['SYSTEM'])
-                        if sys_obj and not sys_obj.STATUS[_system['TS']]['RX_TERMINATED']:
+                        _st = sys_obj.STATUS[_system['TS']] if sys_obj else None
+                        if _st and not _st['RX_TERMINATED'] and _st['RX_TGID'] == _system['TGID']:
                             _system['TIMER'] = _now + _system['TIMEOUT']
                             logger.info('(ROUTER) Conference Bridge TIMEOUT deferred (call in progress): System: %s, Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
                         else:
