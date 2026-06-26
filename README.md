@@ -58,7 +58,9 @@ path configured in `[ALIASES]` (default `./`) and rename it to match `TGID_FILE`
 (default `talkgroup_ids.json`), then edit it to reflect the talkgroups used on your network.
 
 The format is a JSON object with a single key containing a list of records, each with an
-`id` field (integer talkgroup number) and a `callsign` field (display name):
+`id` field (integer talkgroup number) and a `callsign` field (display name). The field is
+named `callsign` because the same parser in `dmr_utils3` handles peer, subscriber, and
+talkgroup files alike — for talkgroups it simply holds the human-readable name:
 
 ```json
 {
