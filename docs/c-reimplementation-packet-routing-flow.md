@@ -214,10 +214,12 @@ not know where every subscriber is at all times, but it learns subscriber locati
 observed traffic and uses that information to make a forwarding decision. HBlink4's
 implementation of this mechanism is the reference for detailed behavior.
 
-The cache is updated on every received DMRD packet: the rf_src ID is recorded as having
-been last seen on the ingress system, and that entry's expiry timestamp is reset to
-current_time + TIMEOUT. This requires no explicit configuration; the cache builds itself
-from observed traffic.
+The cache is updated once per call stream, on the voice header frame (the first DMRD packet
+of a new stream_id). The rf_src ID is recorded as having been last seen on the ingress
+system, and that entry's expiry timestamp is reset to current_time + TIMEOUT. Updating on
+subsequent frames of the same call is redundant — a subscriber's location cannot change
+mid-call — and would add unnecessary work to every packet on the hot path. This requires
+no explicit configuration; the cache builds itself from observed traffic.
 
 The cache must be pruned periodically or it will grow without bound as subscribers come and
 go. A pruning pass runs at a configured interval measured in minutes (not seconds), removing
