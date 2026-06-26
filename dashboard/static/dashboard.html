@@ -118,7 +118,9 @@ function renderServers(){
         // TX (red) for the others, which are hearing the repeated traffic.
         return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx'); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
-      h+='<tr><td class="sysname" data-last-ping="'+(p.LAST_PING||0)+'">'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
+      const warn = p.last_ping_secs != null && p.last_ping_secs > ST.ping_time;
+      const csStyle = warn ? ' style="color:var(--warn)"' : '';
+      h+='<tr><td class="sysname"'+csStyle+'>'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
          '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+
          '<td class="mono sub">'+freq+'</td><td class="mono">'+fmtSlots(p.SLOTS)+'</td>'+
          '<td>'+cell(1)+'</td><td>'+cell(2)+'</td></tr>';
@@ -136,8 +138,10 @@ function renderOutbounds(){
   for(const n of names){
     const s=ST.systems[n], st=s.STATS||{}, act=activeBySlot(n);
     const up = st.CONNECTION==='YES';
+    const warn = (st.NUM_OUTSTANDING||0) > 0;
+    const nameStyle = warn ? ' style="color:var(--warn)"' : '';
     const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
-    h+='<tr><td class="sysname" data-last-ack="'+(st.LAST_PING_ACK_TIME||0)+'">'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
+    h+='<tr><td class="sysname"'+nameStyle+'>'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
        '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
        '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+esc(st.CONNECTION||'NO')+'</span><div class="sub">up '+since+'</div></td>'+
        '<td class="mono">'+fmtSlots(s.SLOTS)+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
@@ -198,9 +202,6 @@ setInterval(()=>{
   document.querySelectorAll('.js-since').forEach(s=>{ s.textContent=dur((+s.dataset.base)+(now-(+s.dataset.arr))/1000); });
   document.querySelectorAll('.js-dur').forEach(s=>{ s.textContent=dur((now-(+s.dataset.start))/1000); });
   document.querySelectorAll('.js-countdown').forEach(s=>{ const r=(+s.dataset.rem)-(now-(+s.dataset.arr))/1000; s.textContent=r<=0?'expired':dur(r); });
-  const nowSec=now/1000;
-  document.querySelectorAll('[data-last-ping]').forEach(td=>{ const lp=+td.dataset.lastPing; td.style.color=(lp>0&&nowSec-lp>ST.ping_time)?'var(--warn)':''; });
-  document.querySelectorAll('[data-last-ack]').forEach(td=>{ const la=+td.dataset.lastAck; td.style.color=(la>0&&nowSec-la>ST.ping_time)?'var(--warn)':''; });
 },1000);
 
 // ---------- websocket ----------
