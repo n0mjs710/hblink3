@@ -585,7 +585,11 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
         elif _command == DMRA:
             _peer_id = _data[4:8]
-            logger.info('(%s) Recieved DMR Talker Alias from repeater %s, subscriber %s', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_rf_src))
+            if _peer_id in self._repeaters \
+                        and self._repeaters[_peer_id]['CONNECTION'] == 'YES' \
+                        and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                _rf_src = _data[8:11]
+                logger.info('(%s) Recieved DMR Talker Alias from repeater %s, subscriber %s', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_rf_src))
 
         else:
             logger.error('(%s) Unrecognized command. Raw HBP PDU: %s', self._system, ahex(_data))
