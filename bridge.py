@@ -637,6 +637,26 @@ class routerHBP(HBSYSTEM):
             else:
                 self.STATUS[_slot]['RX_LC'] = LC_OPT + _dst_id + _rf_src
 
+            # In-band signalling on call START: fire ACTIVATION triggers now so the
+            # header frame and all subsequent frames route to newly-connected targets.
+            _bridge_state_changed = False
+            for _bridge, _system in BRIDGE_BY_SYSTEM.get(self._system, ()):
+                if (_dst_id in _system['ON'] or _dst_id in _system['RESET']) and _slot == _system['TS']:
+                    if _dst_id in _system['ON']:
+                        if _system['ACTIVE'] == False:
+                            _system['ACTIVE'] = True
+                            _bridge_state_changed = True
+                            _system['TIMER'] = pkt_time + _system['TIMEOUT']
+                            logger.info('(%s) Bridge: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
+                            if _system['TO_TYPE'] == 'OFF':
+                                _system['TIMER'] = pkt_time
+                                logger.info('(%s) Bridge: %s set to "OFF" with an on timer rule: timeout timer cancelled', self._system, _bridge)
+                    if _system['ACTIVE'] == True and _system['TO_TYPE'] == 'ON':
+                        _system['TIMER'] = pkt_time + _system['TIMEOUT']
+                        logger.info('(%s) Bridge: %s, timeout timer reset to: %s', self._system, _bridge, _system['TIMER'] - pkt_time)
+            if _bridge_state_changed and CONFIG['REPORTS']['REPORT'] and report_server:
+                report_server.send_bridge()
+
         # Hand each active target the frame; the target system applies its own
         # admission/contention policy and egress framing (see bridge_group).
         _src_lc = self.STATUS[_slot]['RX_LC']
@@ -673,24 +693,6 @@ class routerHBP(HBSYSTEM):
                 if _slot == _system['TS'] and _dst_id == _system['TGID'] and ((_system['TO_TYPE'] == 'ON' and (_system['ACTIVE'] == True)) or (_system['TO_TYPE'] == 'OFF' and _system['ACTIVE'] == False)):
                     _system['TIMER'] = pkt_time + _system['TIMEOUT']
                     logger.info('(%s) Transmission match for Bridge: %s. Reset timeout to %s', self._system, _bridge, _system['TIMER'])
-
-                # TGID matches an ACTIVATION trigger
-                if (_dst_id in _system['ON'] or _dst_id in _system['RESET']) and _slot == _system['TS']:
-                    # Set the matching rule as ACTIVE
-                    if _dst_id in _system['ON']:
-                        if _system['ACTIVE'] == False:
-                            _system['ACTIVE'] = True
-                            _bridge_state_changed = True
-                            _system['TIMER'] = pkt_time + _system['TIMEOUT']
-                            logger.info('(%s) Bridge: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
-                            # Cancel the timer if we've enabled an "OFF" type timeout
-                            if _system['TO_TYPE'] == 'OFF':
-                                _system['TIMER'] = pkt_time
-                                logger.info('(%s) Bridge: %s set to "OFF" with an on timer rule: timeout timer cancelled', self._system, _bridge)
-                    # Reset the timer for the rule
-                    if _system['ACTIVE'] == True and _system['TO_TYPE'] == 'ON':
-                        _system['TIMER'] = pkt_time + _system['TIMEOUT']
-                        logger.info('(%s) Bridge: %s, timeout timer reset to: %s', self._system, _bridge, _system['TIMER'] - pkt_time)
 
                 # TGID matches an DE-ACTIVATION trigger
                 if (_dst_id in _system['OFF']  or _dst_id in _system['RESET']) and _slot == _system['TS']:
