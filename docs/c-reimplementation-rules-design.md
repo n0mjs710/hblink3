@@ -14,7 +14,7 @@ the rules file does.
 macro language**. Its only meaningful output is `BRIDGE_CONF` — a dictionary of bridge
 definitions, each containing a list of system members with their associated parameters.
 
-The Python features operators use in practice are straightforward: named lists defined once
+The Python feature operators used in practice are straightforward: named lists defined once
 and referenced in multiple bridge members, variables holding common parameter sets,
 occasional conditional expressions for environment-specific tweaks. None of this is
 algorithmic; it is all in service of expressing structured data without repetition.
