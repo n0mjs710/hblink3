@@ -43,6 +43,35 @@ See **[INSTALL.md](INSTALL.md)** for full setup, configuration, and running as a
 
 Your `hblink.cfg` and `rules.py` are git-ignored, so `git pull` won't overwrite them.
 
+### Alias files
+
+HBlink3 resolves numeric IDs to human-readable names in logs and in the dashboard. The
+`[ALIASES]` section of `hblink.cfg` controls where these files live and how they are obtained.
+
+**Peer and subscriber aliases** (`peer_ids.json`, `subscriber_ids.json`) are downloaded
+automatically from RadioID.net when `TRY_DOWNLOAD: True` is set and the files are older
+than `STALE_DAYS`. No manual action is needed for these.
+
+**Talkgroup aliases** (`talkgroup_ids.json`) have no automatic download source. This file
+must be created and maintained by the operator. Copy `talkgroup_ids_SAMPLE.json` to the
+path configured in `[ALIASES]` (default `./`) and rename it to match `TGID_FILE`
+(default `talkgroup_ids.json`), then edit it to reflect the talkgroups used on your network.
+
+The format is a JSON object with a single key containing a list of records, each with an
+`id` field (integer talkgroup number) and a `callsign` field (display name):
+
+```json
+{
+    "talkgroups": [
+        {"id": 3100,    "callsign": "Nationwide"},
+        {"id": 3170001, "callsign": "KS Statewide"}
+    ]
+}
+```
+
+The outer key name (`"talkgroups"` above) can be anything — only the list it contains is
+used. Talkgroup IDs not present in the file are displayed as their raw numeric value.
+
 ## Dashboard
 
 A real-time web dashboard lives in [`dashboard/`](dashboard/) — a separate program

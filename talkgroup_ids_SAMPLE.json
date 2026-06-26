@@ -1,0 +1,14 @@
+{
+    "talkgroups": [
+        {"id": 91,      "callsign": "Worldwide"},
+        {"id": 93,      "callsign": "NA"},
+        {"id": 3100,    "callsign": "Nationwide"},
+        {"id": 3101,    "callsign": "TAC 310"},
+        {"id": 3102,    "callsign": "TAC 311"},
+        {"id": 3174,    "callsign": "Kansas City"},
+        {"id": 3170001, "callsign": "KS Statewide"},
+        {"id": 3170009, "callsign": "KS West"},
+        {"id": 9,       "callsign": "Local 9"},
+        {"id": 99,      "callsign": "PARROT"}
+    ]
+}
