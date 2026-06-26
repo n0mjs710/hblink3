@@ -133,14 +133,22 @@ or audio artifacts.
 The only consistent behavior is to overwrite the burst embedded LC with the translated call
 LC on every forwarded frame. This destroys any talker alias that was in those bits.
 
-This is a deliberate design decision, not an oversight. Radios that resolve talker alias
-from an external database (RadioID.net or a locally loaded DMR ID file) are unaffected
-because they do not depend on the embedded TA LC at all.
+This is a deliberate design decision driven by protocol interoperability, not a limitation
+of the LC handling logic. Preserving talker alias embedded LC in voice bursts B through E
+is technically possible in a pure HBP-to-HBP bridging path. The reason it is not done is
+that the bridge must operate correctly across multiple protocols — HBP, IPSC via an adapter
+such as ipsc2hbp, OpenBridge, and potentially future protocols — each of which carries
+talker alias through a different mechanism. IPSC, for example, carries TA entirely outside
+the DMR frame structure. Frames reconstructed by an IPSC-to-HBP adapter carry no valid
+embedded TA LC. Other future protocol adapters may be similarly constrained.
 
-When using an IPSC-to-HBP adapter (such as ipsc2hbp), the situation is compounded: IPSC
-carries talker alias through a completely different mechanism than DMR over-the-air. Frames
-reconstructed from IPSC data cannot reliably contain valid DMR embedded LC in the TA FLCO
-format, so preserving it would be actively harmful.
+Attempting to selectively preserve TA LC only on HBP-to-HBP paths while overwriting it on
+all other paths introduces conditional logic that must be maintained as new protocol adapters
+are added. Overwriting with the call LC on every forwarded frame is the safe, uniform, and
+most interoperable choice across the full range of protocols the bridge may interface with.
+
+Radios that resolve talker alias from an external database (RadioID.net or a locally loaded
+DMR ID file) are unaffected because they do not depend on the embedded TA LC at all.
 
 ---
 
@@ -160,10 +168,18 @@ When a voice terminator frame is received for the current active stream on a sys
 
 ## Stale stream cleanup
 
-If a call is interrupted (repeater loses power, network drop, late terminator) the
+If a call is interrupted (repeater loses power, network drop, lost terminator) the
 stream_id may remain in the active stream table indefinitely. A background cleanup pass
-(run every few seconds) removes stream entries older than a configured stale threshold
-(30 seconds is conservative; real calls end within a few seconds of the last voice frame).
+removes stream entries older than a stale threshold and runs at a periodic interval.
+
+A DMR voice superframe is approximately 360 milliseconds. A call that ends without a
+terminator becomes detectable within one or two superframes of the last received voice
+frame — roughly 1 to 2 seconds. Given the timescales of human PTT interaction, a cleanup
+threshold of 1 to 2 seconds is fast enough to prevent phantom streams from blocking new
+calls without requiring any sub-second precision in the cleanup interval. The cleanup pass
+itself does not need to run faster than every few seconds; it is a backstop for an
+uncommon failure case, not a timing-critical path.
+
 This prevents a lost terminator from leaving a phantom active stream that blocks new calls
 on the same system/slot from being detected as new streams.
 
@@ -188,15 +204,38 @@ atomically alongside the bridge table.
 ## Unit call routing
 
 Private (unit) calls between two subscribers are routed differently from group calls. Rather
-than consulting the bridge table, the router consults a learned subscriber map: a table that
-records which system last heard a given subscriber ID transmit. When a unit call arrives
-addressed to subscriber X, the router looks up X in the subscriber map and forwards the
-call to the system where X was last heard.
+than consulting the bridge table, the router consults a learned subscriber location cache: a
+table that records which system last heard a given subscriber ID transmit. When a unit call
+arrives addressed to subscriber X, the router looks up X in the cache and forwards the call
+to the system where X was last heard.
 
-The subscriber map is updated on every received DMRD packet: the rf_src ID is recorded as
-having been last seen on the ingress system. This requires no explicit configuration; the
-map builds itself from observed traffic.
+The conceptual model is analogous to PIM Sparse Mode for IPv4 multicast: the router does
+not know where every subscriber is at all times, but it learns subscriber location from
+observed traffic and uses that information to make a forwarding decision. HBlink4's
+implementation of this mechanism is the reference for detailed behavior.
 
-Unit call routing is a secondary feature. The subscriber map is lossy by design (last-seen
-wins) and does not handle the case where a subscriber is reachable on multiple systems. It
-is sufficient for the common case of routing a private reply back to the originating repeater.
+The cache is updated on every received DMRD packet: the rf_src ID is recorded as having
+been last seen on the ingress system, and that entry's expiry timestamp is reset to
+current_time + TIMEOUT. This requires no explicit configuration; the cache builds itself
+from observed traffic.
+
+The cache must be pruned periodically or it will grow without bound as subscribers come and
+go. A pruning pass runs at a configured interval measured in minutes (not seconds), removing
+entries whose expiry timestamp has passed. The interval does not need to be fine-grained
+because subscriber location changes on human timescales, not millisecond timescales. Each
+time a subscriber is heard, its entry is refreshed, so active subscribers are never pruned.
+
+When a unit call arrives and the destination subscriber is not in the cache (a cache miss),
+the call must be forwarded to all systems rather than to a single known destination. This is
+the equivalent of a PIM Sparse Mode register/flood before the join tree is established. In
+practice this is a small volume of additional traffic, as cache misses occur only for
+subscribers not recently heard. Each system has a per-system configuration flag that
+specifies whether it accepts unit call flooding (forwarding of unit calls destined for
+unknown subscribers). Systems that do not permit flooding are skipped during a cache miss
+forward. This allows operators to isolate systems that should only receive unit calls with
+a confirmed destination.
+
+The subscriber cache is lossy by design: last-seen wins. It does not handle the case where
+a subscriber is simultaneously reachable on multiple systems. It is the correct and
+sufficient mechanism for the common case of routing a private reply back to the originating
+repeater.
