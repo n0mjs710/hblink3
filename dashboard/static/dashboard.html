@@ -118,7 +118,7 @@ function renderServers(){
         // TX (red) for the others, which are hearing the repeated traffic.
         return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx'); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
-      const warn = p.last_ping_secs != null && p.last_ping_secs > ST.ping_time;
+      const warn = p.last_ping_secs != null && p.last_ping_secs > ST.ping_time * 1.5;
       const csStyle = warn ? ' style="color:var(--warn)"' : '';
       h+='<tr><td class="sysname"'+csStyle+'>'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
          '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+
