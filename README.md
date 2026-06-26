@@ -50,6 +50,32 @@ with a modern dark UI showing master/peer/OpenBridge systems, conference-bridge
 state, and a live call log. Enable HBlink3's reporting feed (`[REPORTS]` in
 `hblink.cfg`) and see [dashboard/README.md](dashboard/README.md) to run it.
 
+## Known Limitations
+
+### DMR Talker Alias is not preserved across bridges
+
+When `bridge.py` routes a call to a system with a different TGID or timeslot, it
+rewrites the Link Control (LC) word in every forwarded DMR frame — voice header,
+voice terminator, and the embedded LC carried in voice bursts B–E. This is
+necessary and correct: the translated TGID and source subscriber ID must be
+consistent in the header LC (call setup and late entry), the terminator LC, and
+the embedded LC in intermediate bursts. A mismatch between the header LC and the
+burst-embedded LC would cause late-joining radios to decode the wrong TGID and
+potentially receive or route traffic incorrectly.
+
+The consequence is that **DMR Talker Alias data embedded in voice bursts is
+destroyed during bridging.** Talker Alias occupies the same embedded LC slots
+(FLCO 0x04–0x07 in bursts B–E) that the bridge overwrites with the translated
+call LC. There is no way to preserve both simultaneously.
+
+This is worse when using an IPSC2/ipsc2hbp adapter. IPSC carries LC completely
+differently from DMR over-the-air; the adapter must reconstruct HBP frames from
+IPSC data, and any talker-alias LC embedded in those reconstructed frames cannot
+be assumed to match the DMR embedded-LC format that HBlink3 expects.
+
+**Workaround:** None at this time. Radios that look up talker alias via the
+RadioID.net database or a local DMR ID file are unaffected.
+
 ## Requirements
 
 - Python **3.8+** (Linux recommended)
