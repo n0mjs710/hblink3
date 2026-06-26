@@ -60,7 +60,9 @@ path configured in `[ALIASES]` (default `./`) and rename it to match `TGID_FILE`
 The format is a JSON object with a single key containing a list of records, each with an
 `id` field (integer talkgroup number) and a `callsign` field (display name). The field is
 named `callsign` because the same parser in `dmr_utils3` handles peer, subscriber, and
-talkgroup files alike — for talkgroups it simply holds the human-readable name:
+talkgroup files alike — for talkgroups it simply holds the human-readable name. The outer
+key name can be anything, but it must be the first and only key in the object — the parser
+takes the value of the first key it finds:
 
 ```json
 {

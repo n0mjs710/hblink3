@@ -1,5 +1,4 @@
 {
-    "_comment": "The 'callsign' field holds the talkgroup display name. The field is named 'callsign' because the same parser handles peer, subscriber, and talkgroup files.",
     "talkgroups": [
         {"id": 91,      "callsign": "Worldwide"},
         {"id": 93,      "callsign": "NA"},
