@@ -666,6 +666,7 @@ class routerHBP(HBSYSTEM):
             # Iterate the rules dictionary
 
             # Indexed lookup of this system's bridge memberships for in-band signalling.
+            _bridge_state_changed = False
             for _bridge, _system in BRIDGE_BY_SYSTEM.get(self._system, ()):
 
                 # TGID matches a rule source, reset its timer
@@ -679,6 +680,7 @@ class routerHBP(HBSYSTEM):
                     if _dst_id in _system['ON']:
                         if _system['ACTIVE'] == False:
                             _system['ACTIVE'] = True
+                            _bridge_state_changed = True
                             _system['TIMER'] = pkt_time + _system['TIMEOUT']
                             logger.info('(%s) Bridge: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
                             # Cancel the timer if we've enabled an "OFF" type timeout
@@ -696,6 +698,7 @@ class routerHBP(HBSYSTEM):
                     if _dst_id in _system['OFF']:
                         if _system['ACTIVE'] == True:
                             _system['ACTIVE'] = False
+                            _bridge_state_changed = True
                             logger.info('(%s) Bridge: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
                             # Cancel the timer if we've enabled an "ON" type timeout
                             if _system['TO_TYPE'] == 'ON':
@@ -709,6 +712,9 @@ class routerHBP(HBSYSTEM):
                     if _system['ACTIVE'] == True and _system['TO_TYPE'] == 'ON' and _dst_id in _system['OFF']:
                         _system['TIMER'] = pkt_time
                         logger.info('(%s) Bridge: %s set to ON with and "OFF" timer rule: timeout timer cancelled', self._system, _bridge)
+
+            if _bridge_state_changed and CONFIG['REPORTS']['REPORT'] and report_server:
+                report_server.send_bridge()
 
         #
         # END IN-BAND SIGNALLING
