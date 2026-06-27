@@ -71,8 +71,8 @@ def _download_aliases():
         return
     base = _abs(PATH)
     stale_secs = int(STALE_DAYS) * 86400
-    try_download(base, PEER_URL, PEER_FILE, stale_secs)
-    try_download(base, SUBSCRIBER_URL, SUBSCRIBER_FILE, stale_secs)
+    try_download(base, PEER_FILE, PEER_URL, stale_secs)
+    try_download(base, SUBSCRIBER_FILE, SUBSCRIBER_URL, stale_secs)
 
 def _reload_aliases():
     global PEER_IDS, SUBSCRIBER_IDS, TALKGROUP_IDS
