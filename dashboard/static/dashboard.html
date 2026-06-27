@@ -54,7 +54,7 @@
 <div class="wrap">
   <header>
     <div class="brand">
-      <img src="/logo.png" alt="HBlink" class="logo">
+      {{LOGO_HTML}}
       <h1>{{REPORT_NAME}}<small>HBlink3 Monitor</small></h1>
     </div>
     <div id="conn" class="badge down">HBlink: connecting…</div>
@@ -134,7 +134,7 @@ function fmtFreq(f){ return f && f.length>=7 ? (f.slice(0,3)+'.'+f.slice(3,7)) :
 function renderOutbounds(){
   const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='OUTBOUND');
   if(!names.length){ el('outbounds').innerHTML='<div class="empty">No outbound systems</div>'; return; }
-  let h='<table><tr><th>System</th><th>Identity</th><th>Connection</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+  let h='<table><tr><th>System</th><th>Identity</th><th>Status</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
   for(const n of names){
     const s=ST.systems[n], st=s.STATS||{}, act=activeBySlot(n);
     const up = st.CONNECTION==='YES';
@@ -143,7 +143,7 @@ function renderOutbounds(){
     const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
     h+='<tr><td class="sysname"'+nameStyle+'>'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
        '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
-       '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+esc(st.CONNECTION||'NO')+'</span><div class="sub">up '+since+'</div></td>'+
+       '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+(up?'Connected':'Disconnected')+'</span><div class="sub">up '+since+'</div></td>'+
        '<td class="mono">'+fmtSlots(s.SLOTS)+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
   }
   el('outbounds').innerHTML=h+'</table>';
@@ -167,17 +167,20 @@ function renderBridges(){
   // One shared table for all bridges so every column lines up across them
   // (each bridge gets a full-width sub-header row). Per-bridge tables auto-size
   // their columns independently, which misaligns Action width and wide TGIDs.
-  let h='<table class="bridges"><tr><th>System</th><th>TS</th><th>TGID</th><th>Status</th><th>Timeout</th><th>Action</th><th>Connect TGIDs</th><th>Disconnect TGIDs</th></tr>';
+  let h='<table class="bridges"><tr><th>System</th><th>TS</th><th>TGID</th><th>Status</th><th>Timeout</th><th>Timer</th><th>Timeout Action</th><th>Activate TGIDs</th><th>Deactivate TGIDs</th></tr>';
   for(const b of names){
-    h+='<tr class="bridge-head"><td colspan="8">'+esc(b)+'</td></tr>';
+    h+='<tr class="bridge-head"><td colspan="9">'+esc(b)+'</td></tr>';
     for(const m of ST.bridges[b]){
       const on=m.ACTIVE;
-      const to = m.TO_TYPE==='ON'||m.TO_TYPE==='OFF';
-      const rem = to ? '<span class="js-countdown mono" data-rem="'+(m.remaining==null?0:m.remaining)+'" data-arr="'+Date.now()+'">'+(m.remaining<=0?'expired':dur(m.remaining))+'</span>' : '<span class="sub">N/A</span>';
-      const act = m.TO_TYPE==='ON'?'Disconnect':m.TO_TYPE==='OFF'?'Connect':'<span class="sub">None</span>';
+      const timerRunning = (m.TO_TYPE==='ON' && m.ACTIVE) || (m.TO_TYPE==='OFF' && !m.ACTIVE);
+      const remS = timerRunning ? (m.remaining==null ? 0 : m.remaining) : null;
+      const rem = remS!=null ? '<span class="js-countdown mono" data-rem="'+remS.toFixed(1)+'" data-arr="'+Date.now()+'">'+(remS<=0?'expired':dur(remS))+'</span>'
+                             : '<span class="sub">N/A</span>';
+      const act = m.TO_TYPE==='ON'?'Disconnect after timer':m.TO_TYPE==='OFF'?'Reconnect after timer':'<span class="sub">None</span>';
       h+='<tr><td class="sysname">'+esc(m.SYSTEM)+'</td><td class="mono">'+m.TS+'</td><td class="mono">'+idName(m.TGID_NAME,m.TGID)+'</td>'+
-         '<td><span class="'+(on?'status-ok':'status-bad')+'">'+(on?'Connected':'Disconnected')+'</span></td>'+
-         '<td>'+rem+'</td><td>'+act+'</td><td class="mono sub">'+(m.ON||[]).join(', ')+'</td><td class="mono sub">'+(m.OFF||[]).join(', ')+'</td></tr>';
+         '<td><span class="'+(on?'status-ok':'status-bad')+'">'+(on?'Active':'Inactive')+'</span></td>'+
+         '<td class="mono sub">'+(m.TO_TYPE!=='NONE'?Math.round(m.TIMEOUT/60)+'m':'<span class="sub">N/A</span>')+'</td>'+
+         '<td>'+rem+'</td><td class="sub">'+act+'</td><td class="mono sub">'+(m.ON||[]).join(', ')+'</td><td class="mono sub">'+(m.OFF||[]).join(', ')+'</td></tr>';
     }
   }
   el('bridges').innerHTML=h+'</table>';

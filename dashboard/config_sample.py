@@ -11,6 +11,7 @@
 
 # Display / branding
 REPORT_NAME     = 'My HBlink3 System'   # Shown in the dashboard header
+LOGO_FILE       = ''                    # Path to a logo image (png/jpg/svg/gif); '' = no logo
 
 # Connection to HBlink3's reporting feed (the [REPORTS] section of hblink.cfg)
 HBLINK_IP       = '127.0.0.1'           # HBlink3 reporting host

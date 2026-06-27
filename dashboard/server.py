@@ -26,7 +26,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import uvicorn
 
@@ -72,6 +72,19 @@ def load_aliases():
     return peer_ids, subscriber_ids, talkgroup_ids
 
 PEER_IDS, SUBSCRIBER_IDS, TALKGROUP_IDS = load_aliases()
+
+# Logo
+try:
+    from config import LOGO_FILE
+except ImportError:
+    LOGO_FILE = ''
+_logo_path = _abs(LOGO_FILE) if LOGO_FILE else ''
+_logo_exists = bool(_logo_path and os.path.isfile(_logo_path))
+_logo_media_type = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+}.get(os.path.splitext(_logo_path)[1].lower(), 'image/png') if _logo_exists else 'image/png'
+LOGO_HTML = '<img src="/logo" alt="" class="logo">' if _logo_exists else ''
 
 def alias(_id, _dict):
     a = get_alias(_id, _dict)
@@ -225,11 +238,13 @@ app = FastAPI(lifespan=lifespan)
 async def index():
     with open(os.path.join(STATIC, 'dashboard.html'), encoding='utf-8') as f:
         html = f.read()
-    return html.replace('{{REPORT_NAME}}', REPORT_NAME)
+    return html.replace('{{REPORT_NAME}}', REPORT_NAME).replace('{{LOGO_HTML}}', LOGO_HTML)
 
-@app.get('/logo.png')
-async def logo():
-    return FileResponse(os.path.join(STATIC, 'HBlink.png'), media_type='image/png')
+@app.get('/logo')
+async def serve_logo():
+    if not _logo_exists:
+        raise HTTPException(status_code=404)
+    return FileResponse(_logo_path, media_type=_logo_media_type)
 
 @app.get('/api/state')
 async def api_state():
