@@ -1034,11 +1034,6 @@ if __name__ == '__main__':
     # Create the name-number mapping dictionaries
     peer_ids, subscriber_ids, talkgroup_ids = mk_aliases(CONFIG)
 
-    def refresh_aliases():
-        global peer_ids, subscriber_ids, talkgroup_ids
-        peer_ids, subscriber_ids, talkgroup_ids = mk_aliases(CONFIG)
-        logger.info('(ALIASES) alias dictionaries refreshed')
-    
     # Import the ruiles file as a module, and create BRIDGES from it
     spec = importlib.util.spec_from_file_location("module.name", cli_args.RULES_FILE)
     rules_module = importlib.util.module_from_spec(spec)
@@ -1095,7 +1090,6 @@ if __name__ == '__main__':
         # Initialize the rule timer (user-activated stuff) and the stream trimmer
         loop.create_task(run_periodic(10, rule_timer_loop, '(ROUTER) rule timer'))
         loop.create_task(run_periodic(1, stream_trimmer_loop, '(ROUTER) stream trimmer'))
-        loop.create_task(run_periodic(86400, refresh_aliases, '(ALIASES) alias refresh'))
 
         await stop_event.wait()
 

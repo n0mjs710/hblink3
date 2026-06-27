@@ -30,7 +30,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import uvicorn
 
-from dmr_utils3.utils import mk_id_dict, get_alias
+from dmr_utils3.utils import mk_id_dict, get_alias, try_download
 
 # Ensure THIS directory's config.py wins over HBlink3's top-level config.py.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +45,14 @@ try:
 except ImportError:
     sys.exit('No config.py found -- copy config_sample.py to config.py and edit it.')
 
+try:
+    from config import TRY_DOWNLOAD, PEER_URL, SUBSCRIBER_URL, STALE_DAYS
+except ImportError:
+    TRY_DOWNLOAD = False
+    PEER_URL = 'https://www.radioid.net/static/rptrs.json'
+    SUBSCRIBER_URL = 'https://www.radioid.net/static/users.json'
+    STALE_DAYS = 7
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('hbdash')
 
@@ -58,20 +66,37 @@ STREAM_STALE = 30
 def _abs(p):
     return p if os.path.isabs(p) else os.path.join(HERE, p)
 
-def load_aliases():
+def _download_aliases():
+    if not TRY_DOWNLOAD:
+        return
     base = _abs(PATH)
-    peer_ids = mk_id_dict(base, PEER_FILE)
-    subscriber_ids = mk_id_dict(base, SUBSCRIBER_FILE)
-    talkgroup_ids = mk_id_dict(base, TGID_FILE)
-    if LOCAL_PEER_FILE:
-        peer_ids.update(mk_id_dict(base, LOCAL_PEER_FILE))
-    if LOCAL_SUB_FILE:
-        subscriber_ids.update(mk_id_dict(base, LOCAL_SUB_FILE))
-    logger.info('aliases loaded: %d peers, %d subscribers, %d talkgroups',
-                len(peer_ids), len(subscriber_ids), len(talkgroup_ids))
-    return peer_ids, subscriber_ids, talkgroup_ids
+    stale_secs = int(STALE_DAYS) * 86400
+    try_download(base, PEER_URL, PEER_FILE, stale_secs)
+    try_download(base, SUBSCRIBER_URL, SUBSCRIBER_FILE, stale_secs)
 
-PEER_IDS, SUBSCRIBER_IDS, TALKGROUP_IDS = load_aliases()
+def _reload_aliases():
+    global PEER_IDS, SUBSCRIBER_IDS, TALKGROUP_IDS
+    base = _abs(PATH)
+    PEER_IDS       = mk_id_dict(base, PEER_FILE)
+    SUBSCRIBER_IDS = mk_id_dict(base, SUBSCRIBER_FILE)
+    TALKGROUP_IDS  = mk_id_dict(base, TGID_FILE)
+    if LOCAL_PEER_FILE:
+        PEER_IDS.update(mk_id_dict(base, LOCAL_PEER_FILE))
+    if LOCAL_SUB_FILE:
+        SUBSCRIBER_IDS.update(mk_id_dict(base, LOCAL_SUB_FILE))
+    logger.info('aliases loaded: %d peers, %d subscribers, %d talkgroups',
+                len(PEER_IDS), len(SUBSCRIBER_IDS), len(TALKGROUP_IDS))
+
+PEER_IDS = {}
+SUBSCRIBER_IDS = {}
+TALKGROUP_IDS = {}
+
+async def _alias_refresh_loop():
+    while True:
+        await asyncio.sleep(86400)
+        logger.info('aliases: starting daily refresh')
+        await asyncio.to_thread(_download_aliases)
+        _reload_aliases()
 
 # Logo
 try:
@@ -224,11 +249,15 @@ async def reap_streams():
 
 @asynccontextmanager
 async def lifespan(app):
-    feed = asyncio.create_task(hblink_feed())
-    reaper = asyncio.create_task(reap_streams())
+    await asyncio.to_thread(_download_aliases)
+    _reload_aliases()
+    refresher = asyncio.create_task(_alias_refresh_loop())
+    feed      = asyncio.create_task(hblink_feed())
+    reaper    = asyncio.create_task(reap_streams())
     yield
     feed.cancel()
     reaper.cancel()
+    refresher.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
