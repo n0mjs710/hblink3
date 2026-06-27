@@ -81,19 +81,12 @@ async def run_periodic(_interval, _func, _name, *_args):
 # Set up the TCP reporting server and its periodic config push. Must be called
 # from within the running asyncio event loop (e.g. from async_main).
 def config_reports(_config, _factory):
-    def reporting_loop(_logger, _server):
-        _logger.debug('(GLOBAL) Periodic reporting loop started')
-        _server.send_config()
-
-    logger.info('(GLOBAL) HBlink TCP reporting server configured')
-
+    logger.info('(REPORT) HBlink TCP reporting server configured')
     report_server = _factory(_config)
-    report_server.clients = []
     loop = asyncio.get_event_loop()
     loop.create_task(report_server.start(_config['REPORTS']['REPORT_PORT']))
     loop.create_task(run_periodic(_config['REPORTS']['REPORT_INTERVAL'],
-                                  reporting_loop, '(GLOBAL) reporting', logger, report_server))
-
+                                  report_server.periodic_push, '(REPORT) periodic push'))
     return report_server
 
 
@@ -701,38 +694,10 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 #
 # Socket-based reporting section
 #
-# Per-connection reporting protocol. The wire format is newline-delimited JSON
-# (NDJSON): each message is one json.dumps(...) object terminated by '\n'. A
-# consumer (such as the dashboard) connects and passively receives a config
-# snapshot followed by a live stream of events.
-class report(asyncio.Protocol):
-    def __init__(self, factory):
-        self._factory = factory
-        self.transport = None
-
-    def connection_made(self, transport):
-        peername = transport.get_extra_info('peername')
-        host = peername[0] if peername else ''
-        clients = self._factory._config['REPORTS']['REPORT_CLIENTS']
-        if host in clients or '*' in clients:
-            self.transport = transport
-            self._factory.clients.append(self)
-            logger.info('(REPORT) reporting client connected: %s', peername)
-            self._factory.send_initial(self)
-        else:
-            logger.error('(REPORT) Invalid report client connection attempt from: %s', peername)
-            transport.close()
-
-    def connection_lost(self, exc):
-        if self in self._factory.clients:
-            self._factory.clients.remove(self)
-        logger.info('(REPORT) reporting client disconnected')
-
-    def data_received(self, data):
-        pass    # consumers are passive; nothing to read from them
-
-    def send_raw(self, _line):
-        self.transport.write(_line)
+# Async TCP server that pushes NDJSON events to connected dashboard clients.
+# Wire format: one json.dumps() object per line ('\n'-terminated).
+# A consumer connects and receives a full state snapshot immediately,
+# then a live stream of incremental events.
 
 
 # Build a JSON-serializable view of the SYSTEMS config for consumers. Bytes
@@ -790,43 +755,84 @@ def json_systems(_systems):
     return out
 
 
-# Manages the set of connected reporting clients. Doubles as the asyncio protocol
-# factory (it is callable) passed to loop.create_server().
-class reportFactory:
-    def __init__(self, config):
-        self._config = config
-        self.clients = []
-
-    def __call__(self):
-        return report(self)
+class ReportServer:
+    def __init__(self, _config):
+        self._config = _config
+        self.clients = []   # list of asyncio.StreamWriter
 
     async def start(self, port):
-        loop = asyncio.get_running_loop()
-        self._server = await loop.create_server(self, None, port)
+        allowed = self._config['REPORTS']['REPORT_CLIENTS']
+        try:
+            server = await asyncio.start_server(
+                lambda r, w: self._client_connected(r, w, allowed),
+                host='0.0.0.0',
+                port=port,
+            )
+        except OSError as e:
+            logger.error('(REPORT) Reporting server could not bind port %s: %s', port, e)
+            return
         logger.info('(REPORT) HBlink reporting server listening on port %s', port)
+        async with server:
+            await server.serve_forever()
 
-    def send_clients(self, _obj):
-        line = (json.dumps(_obj) + '\n').encode('utf-8')
-        for client in self.clients:
-            client.send_raw(line)
+    async def _client_connected(self, reader, writer, allowed):
+        addr = writer.get_extra_info('peername')
+        if '*' not in allowed and addr[0] not in allowed:
+            logger.warning('(REPORT) Connection rejected from %s', addr[0])
+            writer.close()
+            return
+        logger.info('(REPORT) Reporting client connected: %s:%s', addr[0], addr[1])
+        self.clients.append(writer)
+        self.send_config()
+        self.send_bridge()
+        try:
+            while True:
+                data = await reader.read(256)
+                if not data:
+                    break
+        except asyncio.IncompleteReadError:
+            pass
+        except Exception as e:
+            logger.warning('(REPORT) Reporting client error: %s', e)
+        finally:
+            if writer in self.clients:
+                self.clients.remove(writer)
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+            logger.info('(REPORT) Reporting client disconnected: %s:%s', addr[0], addr[1])
 
-    def send_to(self, _client, _obj):
-        _client.send_raw((json.dumps(_obj) + '\n').encode('utf-8'))
+    def _send_json(self, obj):
+        data = (json.dumps(obj) + '\n').encode()
+        dead = []
+        for writer in self.clients:
+            try:
+                writer.write(data)
+            except Exception as e:
+                logger.warning('(REPORT) Write error: %s', e)
+                dead.append(writer)
+        for w in dead:
+            if w in self.clients:
+                self.clients.remove(w)
 
-    def config_event(self):
-        return {
+    def send_config(self):
+        self._send_json({
             'type': 'config',
             'systems': json_systems(self._config['SYSTEMS']),
             'ping_time': self._config['GLOBAL'].get('PING_TIME', 5),
             'max_missed': self._config['GLOBAL'].get('MAX_MISSED', 3),
-        }
+        })
 
-    def send_config(self):
-        self.send_clients(self.config_event())
+    def send_bridge(self):
+        pass  # Overridden by BridgeReportServer in bridge.py
 
-    # Sent to a single client immediately after it connects so it has full state.
-    def send_initial(self, _client):
-        self.send_to(_client, self.config_event())
+    def send_bridge_event(self, _data):
+        pass  # Overridden by BridgeReportServer in bridge.py
+
+    def periodic_push(self):
+        self.send_config()
 
 
 # ID ALIAS CREATION
@@ -907,7 +913,7 @@ if __name__ == '__main__':
 
         # INITIALIZE THE REPORTING LOOP
         if CONFIG['REPORTS']['REPORT']:
-            report_server = config_reports(CONFIG, reportFactory)
+            report_server = config_reports(CONFIG, ReportServer)
         else:
             report_server = None
             logger.info('(REPORT) TCP Socket reporting not configured')
