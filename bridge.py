@@ -136,9 +136,9 @@ def make_bridges(_rules):
                 sys.exit('ERROR: Conference bridge "{}" references a system named "{}" that is not enabled in the main configuration'.format(_bridge, _system['SYSTEM']))
 
             _system['TGID']       = bytes_3(_system['TGID'])
-            for i, e in enumerate(_system['ON']):
+            for i, _ in enumerate(_system['ON']):
                 _system['ON'][i]  = bytes_3(_system['ON'][i])
-            for i, e in enumerate(_system['OFF']):
+            for i, _ in enumerate(_system['OFF']):
                 _system['OFF'][i] = bytes_3(_system['OFF'][i])
             _system['TIMEOUT']    = _system['TIMEOUT']*60
             if _system['ACTIVE'] == True:
@@ -247,7 +247,7 @@ def stream_trimmer_loop():
                         systems[system]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(system, int_id(_slot['TX_STREAM_ID']), int_id(_slot['TX_PEER']), int_id(_slot['TX_RFS']), slot, int_id(_slot['TX_TGID']), _slot['TX_TIME'] - _slot['TX_START']).encode(encoding='utf-8', errors='ignore'))
 
         # OBP systems
-        # We can't delete items from a dicationry that's being iterated, so we have to make a temporarly list of entrys to remove later
+        # We can't delete items from a dictionary that's being iterated, so build a removal list first
         if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
             remove_list = []
             for stream_id in systems[system].STATUS:

@@ -139,24 +139,16 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
 
     def send_system(self, _packet):
         if _packet[:4] == DMRD:
-            #_packet = _packet[:11] + self._config['NETWORK_ID'] + _packet[15:]
             _packet = b''.join([_packet[:11], self._config['NETWORK_ID'], _packet[15:]])
-            #_packet += hmac_new(self._config['PASSPHRASE'],_packet,sha1).digest()
             _packet = b''.join([_packet, (hmac_new(self._config['PASSPHRASE'],_packet,sha1).digest())])
             self.transport.sendto(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
-            # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
-            # logger.debug('(%s) TX Packet to OpenBridge %s:%s -- %s', self._system, self._config['TARGET_IP'], self._config['TARGET_PORT'], ahex(_packet))
         else:
             logger.error('(%s) OpenBridge system was asked to send non DMRD packet: %s', self._system, _packet)
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
-        pass
-        #print(int_id(_peer_id), int_id(_rf_src), int_id(_dst_id), int_id(_seq), _slot, _call_type, _frame_type, repr(_dtype_vseq), int_id(_stream_id))
+        """Override in a subclass to handle inbound DMRD frames."""
 
     def datagram_received(self, _packet, _sockaddr):
-        # Keep This Line Commented Unless HEAVILY Debugging!
-        #logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_packet))
-
         if _packet[:4] == DMRD:    # DMRData -- encapsulated DMR data frame
             _data = _packet[:53]
             _hash = _packet[53:]
@@ -169,7 +161,6 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
                 _dst_id = _data[8:11]
                 _bits = _data[15]
                 _slot = 2 if (_bits & 0x80) else 1
-                #_call_type = 'unit' if (_bits & 0x40) else 'group'
                 if _bits & 0x40:
                     _call_type = 'unit'
                 elif (_bits & 0x23) == 0x23:
@@ -179,7 +170,6 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
                 _frame_type = (_bits & 0x30) >> 4
                 _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
                 _stream_id = _data[16:20]
-                #logger.debug('(%s) DMRD - Seqence: %s, RF Source: %s, Destination ID: %s', self._system, int_id(_seq), int_id(_rf_src), int_id(_dst_id))
 
                 # Sanity check for OpenBridge -- all calls must be on Slot 1 for Brandmeister or DMR+. Other HBlinks can process timeslot on OPB if the flag is set
                 if _slot != 1 and not self._config['BOTH_SLOTS'] and not _call_type == 'unit':
@@ -295,14 +285,11 @@ class HBSYSTEM(asyncio.DatagramProtocol):
     def send_repeaters(self, _packet):
         for _repeater in self._repeaters:
             self.send_repeater(_repeater, _packet)
-            #logger.debug('(%s) Packet sent to repeater %s', self._system, self._repeaters[_repeater]['RADIO_ID'])
 
     def send_repeater(self, _repeater, _packet):
         if _packet[:4] == DMRD:
             _packet = b''.join([_packet[:11], _repeater, _packet[15:]])
         self.transport.sendto(_packet, self._repeaters[_repeater]['SOCKADDR'])
-        # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
-        #logger.debug('(%s) TX Packet to %s on port %s: %s', self._repeaters[_repeater]['RADIO_ID'], self._repeaters[_repeater]['IP'], self._repeaters[_repeater]['PORT'], ahex(_packet))
 
     # Whether this system can currently deliver bridged call traffic. An OUTBOUND
     # client can only forward to its upstream server once it has finished logging
@@ -321,11 +308,9 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 return
             _packet = b''.join([_packet[:11], self._config['RADIO_ID'], _packet[15:]])
         self.transport.sendto(_packet, self._config['SERVER_SOCKADDR'])
-        # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
-        # logger.debug('(%s) TX Packet to %s:%s -- %s', self._system, self._config['SERVER_IP'], self._config['SERVER_PORT'], ahex(_packet))
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
-        pass
+        """Override in a subclass to handle inbound DMRD frames."""
 
     # Apply GLOBAL then SYSTEM ACLs to an inbound DMRD frame. Returns True if the
     # call must be dropped (logging each dropped stream only once per slot), else False.
@@ -364,9 +349,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
     # Aliased in __init__ to datagram_received if system is a server
     def server_datagram_received(self, _data, _sockaddr):
-        # Keep This Line Commented Unless HEAVILY Debugging!
-        # logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_data))
-
         # Extract the command, which is various length, all but one 4 significant characters -- RPTCL
         _command = _data[:4]
 
@@ -380,7 +362,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 _dst_id = _data[8:11]
                 _bits = _data[15]
                 _slot = 2 if (_bits & 0x80) else 1
-                #_call_type = 'unit' if (_bits & 0x40) else 'group'
                 if _bits & 0x40:
                     _call_type = 'unit'
                 elif (_bits & 0x23) == 0x23:
@@ -390,7 +371,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 _frame_type = (_bits & 0x30) >> 4
                 _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
                 _stream_id = _data[16:20]
-                #logger.debug('(%s) DMRD - Seqence: %s, RF Source: %s, Destination ID: %s', self._system, _seq, int_id(_rf_src), int_id(_dst_id))
                 # ACL Processing
                 if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
                     return
@@ -402,7 +382,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                         if _repeater != _peer_id:
                             pkt[1] = _repeater
                             self.transport.sendto(b''.join(pkt), self._repeaters[_repeater]['SOCKADDR'])
-                            #logger.debug('(%s) Packet on TS%s from %s (%s) for destination ID %s repeated to repeater: %s (%s) [Stream ID: %s]', self._system, _slot, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id), int_id(_dst_id), self._repeaters[_repeater]['CALLSIGN'], int_id(_repeater), int_id(_stream_id))
 
 
                 # Userland actions -- typically this is the function you subclass for an application
@@ -596,9 +575,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
     # Aliased in __init__ to datagram_received if system is an outbound client
     def outbound_datagram_received(self, _data, _sockaddr):
-        # Keep This Line Commented Unless HEAVILY Debugging!
-        # logger.debug('(%s) RX packet from %s -- %s', self._system, _sockaddr, ahex(_data))
-
         # Validate that we receveived this packet from the server - security check!
         if self._config['SERVER_SOCKADDR'] == _sockaddr:
             # Extract the command, which is various length, but only 4 significant characters
@@ -612,7 +588,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     _dst_id = _data[8:11]
                     _bits = _data[15]
                     _slot = 2 if (_bits & 0x80) else 1
-                    #_call_type = 'unit' if (_bits & 0x40) else 'group'
                     if _bits & 0x40:
                         _call_type = 'unit'
                     elif (_bits & 0x23) == 0x23:
@@ -622,7 +597,6 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     _frame_type = (_bits & 0x30) >> 4
                     _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
                     _stream_id = _data[16:20]
-                    #logger.debug('(%s) DMRD - Sequence: %s, RF Source: %s, Destination ID: %s', self._system, int_id(_seq), int_id(_rf_src), int_id(_dst_id))
 
                     # ACL Processing
                     if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
