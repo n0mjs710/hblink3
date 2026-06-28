@@ -160,6 +160,7 @@ def build_config(_config_file):
 
             elif section == 'ALIASES':
                 CONFIG['ALIASES'].update({
+                    'USE_ALIASES': config.getboolean(section, 'USE_ALIASES', fallback=False),
                     'TRY_DOWNLOAD': config.getboolean(section, 'TRY_DOWNLOAD'),
                     'PATH': config.get(section, 'PATH'),
                     'PEER_FILE': config.get(section, 'PEER_FILE'),

@@ -838,6 +838,9 @@ class ReportServer:
 # ID ALIAS CREATION
 # Download
 def mk_aliases(_config):
+    if not _config['ALIASES'].get('USE_ALIASES', True):
+        logger.info('(GLOBAL) ID ALIAS MAPPER: disabled in configuration')
+        return {}, {}, {}
     if _config['ALIASES']['TRY_DOWNLOAD'] == True:
         # Try updating peer aliases file
         result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'], _config['ALIASES']['PEER_URL'], _config['ALIASES']['STALE_TIME'])
