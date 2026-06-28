@@ -62,3 +62,10 @@ In `hblink.cfg`, under `[REPORTS]`:
   newline-delimited JSON, which HBmonitor does not understand.
 - The dashboard depends on FastAPI + Uvicorn; the HBlink3 core itself remains
   stdlib-only.
+- **Demo mode** — append `?demo` to the dashboard URL (e.g.
+  `http://localhost:8080/?demo`) to load a static pre-populated scenario showing
+  all visual elements: a SERVER with three repeaters, an OUTBOUND peer, an
+  OpenBridge connection, active calls bridged coherently across systems, a slot
+  in group-hangtime, and a populated call log. No HBlink3 connection is required.
+  This is useful for understanding what the dashboard looks like under normal
+  operating conditions before any traffic has been seen.
