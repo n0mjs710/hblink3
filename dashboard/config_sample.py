@@ -43,3 +43,8 @@ LOCAL_PEER_FILE = ''                    # optional local peer override, '' to di
 PEER_URL        = 'https://www.radioid.net/static/rptrs.json'
 SUBSCRIBER_URL  = 'https://www.radioid.net/static/users.json'
 STALE_DAYS      = 7                     # re-download after this many days
+
+# Country filter for subscriber downloads. Only records matching these country
+# names (as they appear in the radioid.net data) are written to disk, which
+# keeps memory use and load time low. Set to [] or None to load all countries.
+FILTER_COUNTRIES = ['United States', 'France']

@@ -21,16 +21,19 @@ import asyncio
 import json
 import logging
 import os
+import ssl
 import sys
 import time
 from collections import deque
 from contextlib import asynccontextmanager
+from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+import ijson
 import uvicorn
 
-from dmr_utils3.utils import mk_id_dict, get_alias, try_download
+from dmr_utils3.utils import mk_id_dict, get_alias
 
 # Ensure THIS directory's config.py wins over HBlink3's top-level config.py.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +56,11 @@ except ImportError:
     SUBSCRIBER_URL = 'https://www.radioid.net/static/users.json'
     STALE_DAYS = 7
 
+try:
+    from config import FILTER_COUNTRIES
+except ImportError:
+    FILTER_COUNTRIES = None
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('hbdash')
 
@@ -66,13 +74,41 @@ STREAM_STALE = 30
 def _abs(p):
     return p if os.path.isabs(p) else os.path.join(HERE, p)
 
+def _stream_id_file(url, path, json_key, countries, stale_secs):
+    now = time.time()
+    if os.path.isfile(path) and (os.path.getmtime(path) + stale_secs) >= now:
+        logger.info('ID ALIAS MAPPER: %s is current, not downloaded', os.path.basename(path))
+        return
+    no_verify = ssl._create_unverified_context()
+    tmp = path + '.tmp'
+    try:
+        with urlopen(url, context=no_verify) as response, \
+             open(tmp, 'w', encoding='utf-8') as out:
+            out.write('{"%s":[' % json_key)
+            first = True
+            for record in ijson.items(response, json_key + '.item'):
+                if not countries or record.get('country') in countries:
+                    if not first:
+                        out.write(',')
+                    json.dump({'id': record['id'], 'callsign': record['callsign']}, out)
+                    first = False
+            out.write(']}')
+        os.replace(tmp, path)
+        label = ', '.join(sorted(countries)) if countries else 'all countries'
+        logger.info('ID ALIAS MAPPER: %s downloaded (%s)', os.path.basename(path), label)
+    except IOError as e:
+        logger.error('ID ALIAS MAPPER: download of %s failed: %s', os.path.basename(path), e)
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
 def _download_aliases():
     if not TRY_DOWNLOAD:
         return
     base = _abs(PATH)
     stale_secs = int(STALE_DAYS) * 86400
-    try_download(base, PEER_FILE, PEER_URL, stale_secs)
-    try_download(base, SUBSCRIBER_FILE, SUBSCRIBER_URL, stale_secs)
+    countries = set(FILTER_COUNTRIES) if FILTER_COUNTRIES else None
+    _stream_id_file(PEER_URL,       base + PEER_FILE,       'rptrs', countries, stale_secs)
+    _stream_id_file(SUBSCRIBER_URL, base + SUBSCRIBER_FILE, 'users', countries, stale_secs)
 
 def _reload_aliases():
     global PEER_IDS, SUBSCRIBER_IDS, TALKGROUP_IDS

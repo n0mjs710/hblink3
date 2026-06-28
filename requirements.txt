@@ -11,4 +11,5 @@
 #
 # Floors are conservative; the versions these were last tested against are noted.
 bitarray>=2.0.0      # tested: 3.8.1
-dmr_utils3>=0.1.30   # tested: 0.1.30
+dmr_utils3>=0.1.31   # tested: 0.1.31
+ijson>=3.2           # streaming JSON parse for filtered subscriber downloads
