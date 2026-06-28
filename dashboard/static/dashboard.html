@@ -38,6 +38,8 @@
   .call.idle{color:#475569;background:var(--panel2);border:1px solid transparent}
   .call.rx{background:var(--green-bg);color:#86efac;border:1px solid var(--green)}        /* receive */
   .call.tx{background:var(--red-bg);color:#fca5a5;border:1px solid var(--red)}            /* transmit */
+  .call.hang{background:#0d2137;color:#7dd3fc;border:1px solid #075985}
+  .call.rx .sub,.call.tx .sub,.call.hang .sub{color:inherit;opacity:.85}
   .call .call-top{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .call b{color:var(--text)}
   .status-ok{color:#4ade80;font-weight:600}
@@ -68,7 +70,7 @@
 </div>
 
 <script>
-const ST = { systems:{}, bridges:{}, active:{}, log:[], hblink:false, ping_time:5, max_missed:3 };
+const ST = { systems:{}, bridges:{}, active:{}, hang:{}, log:[], hblink:false, ping_time:5, max_missed:3 };
 const STALE = 30000;   // drop an active call this many ms after START if no END arrives
 
 // ---------- helpers ----------
@@ -88,15 +90,23 @@ const callShort = ct => ct==='GROUP VOICE'?'Group Voice':ct==='UNIT VOICE'?'Unit
 function activeBySlot(sys){ const r={1:null,2:null}; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) r[e.slot]=e;} return r; }
 function activeList(sys){ const a=[]; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) a.push(e);} return a; }
 
-function callCell(e, klass){
+function callCell(e, klass, hang){
+  if(!e && hang){
+    const tg   = hang.dst_alias ? esc(hang.dst_alias) : esc(String(hang.dst||''));
+    const left = Math.max(0, hang._expires - Date.now()/1000);
+    return '<div class="call hang">'
+         + '<div class="call-top">'+esc(hang.trx)+' hang → '+tg+'</div>'
+         + '<div class="sub mono"><span class="js-countdown" data-rem="'+left.toFixed(1)+'" data-arr="'+Date.now()+'">'+dur(left)+'</span> remaining</div>'
+         + '</div>';
+  }
   if(!e) return '<div class="call idle"><div class="call-top">— idle —</div><div class="sub mono">&nbsp;</div></div>';
-  const src = e.src_alias ? esc(e.src_alias) : e.src;       // top line prefers the callsign/alias
-  const dst = e.dst_alias ? esc(e.dst_alias) : e.dst;       // TGID name (group) or unit alias
+  const src = e.src_alias ? esc(e.src_alias) : e.src;
+  const dst = e.dst_alias ? esc(e.dst_alias) : e.dst;
   const d='<span class="js-dur" data-start="'+e._arrived+'">'+dur((Date.now()-e._arrived)/1000)+'</span>';
-  return '<div class="call '+klass+'">'+
-           '<div class="call-top">'+src+' → '+dst+'</div>'+
-           '<div class="sub mono">'+callShort(e.call_type)+' · '+e.src+' · '+d+'</div>'+
-         '</div>';
+  return '<div class="call '+klass+'">'
+       + '<div class="call-top">'+src+' → '+dst+'</div>'
+       + '<div class="sub mono">'+esc(e.trx)+' · '+callShort(e.call_type)+' · '+e.src+' · '+d+'</div>'
+       + '</div>';
 }
 
 // ---------- renderers ----------
@@ -112,10 +122,11 @@ function renderServers(){
     if(!pids.length) h+='<tr><td colspan="6" class="sub">No repeaters connected</td></tr>';
     for(const pid of pids){
       const p=repeaters[pid];
-      const cell=(slot)=>{ const e=act[slot]; if(!e) return callCell(null);
+      const cell=(slot)=>{ const e=act[slot], hang=ST.hang[n+'|'+slot]||null;
+        if(!e) return callCell(null, null, hang);
         // Colour purely by direction: the call's own RX/TX for the source repeater,
         // TX (red) for the others, which are hearing the repeated traffic.
-        return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx'); };
+        return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx', hang); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
       const warn = p.last_ping_secs != null && p.last_ping_secs > ST.ping_time * 1.5;
       const csStyle = warn ? ' style="color:var(--warn)"' : '';
@@ -143,7 +154,7 @@ function renderOutbounds(){
     h+='<tr><td class="sysname"'+nameStyle+'>'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
        '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
        '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+(up?'Connected':'Disconnected')+'</span><div class="sub">up '+since+'</div></td>'+
-       '<td class="mono">'+fmtSlots(s.SLOTS)+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx')+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx')+'</td></tr>';
+       '<td class="mono">'+fmtSlots(s.SLOTS)+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx', ST.hang[n+'|1']||null)+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx', ST.hang[n+'|2']||null)+'</td></tr>';
   }
   el('outbounds').innerHTML=h+'</table>';
 }
@@ -200,6 +211,7 @@ setInterval(()=>{
   // reap stale active streams whose END never arrived (interrupted/lost calls)
   let reaped=false;
   for(const k in ST.active){ if(now-ST.active[k]._arrived>STALE){ delete ST.active[k]; reaped=true; } }
+  for(const k in ST.hang)  { if(now/1000 > ST.hang[k]._expires)  { delete ST.hang[k];   reaped=true; } }
   if(reaped) renderAll();
   document.querySelectorAll('.js-since').forEach(s=>{ s.textContent=dur((+s.dataset.base)+(now-(+s.dataset.arr))/1000); });
   document.querySelectorAll('.js-dur').forEach(s=>{ s.textContent=dur((now-(+s.dataset.start))/1000); });
@@ -212,7 +224,15 @@ function renderAll(){ renderServers(); renderOutbounds(); renderOpenbridges(); r
 
 function applyStream(e){
   e._arrived = e._arrived || Date.now();
-  if(e.action==='START') ST.active[skey(e)]=e; else delete ST.active[skey(e)];
+  const hkey = e.system+'|'+e.slot;
+  if(e.action==='START'){
+    delete ST.hang[hkey];
+    ST.active[skey(e)]=e;
+  } else {
+    delete ST.active[skey(e)];
+    const ht = (ST.systems[e.system]||{}).GROUP_HANGTIME||0;
+    if(ht>0) ST.hang[hkey] = Object.assign({}, e, {_expires: Date.now()/1000 + ht});
+  }
   if(e.trx==='RX'){ ST.log.unshift(e); if(ST.log.length>400) ST.log.pop(); renderLog(); }
   // re-render the affected system class
   const sys=ST.systems[e.system];
