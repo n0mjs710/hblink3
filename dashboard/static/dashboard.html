@@ -175,7 +175,7 @@ function renderOpenbridges(){
   let h='<table><tr><th>System</th><th>Network / Target</th><th>Active Streams</th></tr>';
   for(const n of names){
     const o=ST.systems[n], streams=activeList(n);
-    const cells = streams.length ? streams.map(e=>'<span class="call '+(e.trx==='TX'?'tx':'rx')+'" style="display:inline-block;margin:2px">'+e.trx+' · '+idName(e.src_alias,e.src)+' → '+idName(e.dst_alias,e.dst)+'</span>').join(' ') : '<span class="call idle" style="display:inline-block">— idle —</span>';
+    const cells = streams.length ? streams.map(e=>'<span class="call '+(e.trx==='TX'?'tx':'rx')+'" style="display:inline-block;width:auto;margin:2px">'+e.trx+' · '+idName(e.src_alias,e.src)+' → '+idName(e.dst_alias,e.dst)+'</span>').join(' ') : '<span class="call idle" style="display:inline-block;width:auto">— idle —</span>';
     h+='<tr><td class="sysname">'+esc(n)+'</td><td class="mono">ID '+esc(o.NETWORK_ID)+'<div class="sub">'+esc(o.TARGET_IP)+':'+esc(o.TARGET_PORT)+'</div></td><td>'+cells+'</td></tr>';
   }
   el('openbridges').innerHTML=h+'</table>';
