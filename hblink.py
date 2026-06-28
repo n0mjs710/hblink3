@@ -714,6 +714,7 @@ def json_systems(_systems):
         if mode == 'SERVER':
             view['REPEAT'] = c.get('REPEAT', False)
             view['MAX_REPEATERS'] = c.get('MAX_REPEATERS')
+            view['GROUP_HANGTIME'] = c.get('GROUP_HANGTIME', 0)
             repeaters = {}
             for pid, p in c['REPEATERS'].items():
                 repeaters[str(int_id(pid))] = {
@@ -734,6 +735,7 @@ def json_systems(_systems):
             stats = c.get('STATS', {})
             view.update({
                 'RADIO_ID':    int_id(c['RADIO_ID']),
+                'GROUP_HANGTIME': c.get('GROUP_HANGTIME', 0),
                 'CALLSIGN':     s(c['CALLSIGN']),
                 'LOCATION':     s(c['LOCATION']),
                 'SERVER_IP':    c['SERVER_IP'],
