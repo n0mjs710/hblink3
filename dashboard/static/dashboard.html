@@ -82,7 +82,7 @@ function dur(secs){
 const skey = e => e.system+'|'+e.slot+'|'+e.stream_id;
 function fmtSlots(s){ return s==='3'||s===3?'Both':s==='1'||s===1?'TS1':s==='2'||s===2?'TS2':esc(String(s||'')); }
 const idName = (name,id)=> name ? esc(name)+' <span class="sub mono">('+id+')</span>' : '<span class="mono">'+id+'</span>';
-const callShort = ct => ct==='GROUP VOICE'?'Group':ct==='UNIT VOICE'?'Unit':esc(ct);
+const callShort = ct => ct==='GROUP VOICE'?'Group Voice':ct==='UNIT VOICE'?'Unit Voice':ct==='GROUP DATA'?'Group Data':ct==='UNIT DATA'?'Unit Data':esc(ct);
 
 // active call(s) for a system, by slot (most recent wins)
 function activeBySlot(sys){ const r={1:null,2:null}; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) r[e.slot]=e;} return r; }
