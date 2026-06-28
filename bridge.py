@@ -116,12 +116,11 @@ def make_bridges(_rules):
             if _system['SYSTEM'] not in CONFIG['SYSTEMS']:
                 sys.exit('ERROR: Conference bridge "{}" references a system named "{}" that is not enabled in the main configuration'.format(_bridge, _system['SYSTEM']))
 
-            _system['TGID']       = bytes_3(_system['TGID'])
-            for i, _ in enumerate(_system['ON']):
-                _system['ON'][i]  = bytes_3(_system['ON'][i])
-            for i, _ in enumerate(_system['OFF']):
-                _system['OFF'][i] = bytes_3(_system['OFF'][i])
-            _system['TIMEOUT']    = _system['TIMEOUT']*60
+            _system['TGID']    = bytes_3(_system['TGID'])
+            _system['ON']      = frozenset(bytes_3(x) for x in _system['ON'])
+            _system['OFF']     = frozenset(bytes_3(x) for x in _system['OFF'])
+            _system['RESET']   = frozenset(bytes_3(x) for x in _system['RESET'])
+            _system['TIMEOUT'] = _system['TIMEOUT']*60
             if _system['ACTIVE'] == True:
                 _system['TIMER']  = time() + _system['TIMEOUT']
             else:
