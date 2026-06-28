@@ -93,10 +93,9 @@ function callCell(e, klass){
   const src = e.src_alias ? esc(e.src_alias) : e.src;       // top line prefers the callsign/alias
   const dst = e.dst_alias ? esc(e.dst_alias) : e.dst;       // TGID name (group) or unit alias
   const d='<span class="js-dur" data-start="'+e._arrived+'">'+dur((Date.now()-e._arrived)/1000)+'</span>';
-  // Top line: call type, source, destination (names).  Bottom: radio ID + elapsed.
   return '<div class="call '+klass+'">'+
-           '<div class="call-top">'+callShort(e.call_type)+' · '+src+' → '+dst+'</div>'+
-           '<div class="sub mono">'+e.src+' · '+d+'</div>'+
+           '<div class="call-top">'+src+' → '+dst+'</div>'+
+           '<div class="sub mono">'+callShort(e.call_type)+' · '+e.src+' · '+d+'</div>'+
          '</div>';
 }
 
