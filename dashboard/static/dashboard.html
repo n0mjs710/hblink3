@@ -50,6 +50,10 @@
   #log{background:#0b1220;border:1px solid var(--border);border-radius:8px;height:230px;overflow-y:auto;padding:8px 10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5}
   #log .start{color:#7dd3fc}#log .end{color:#86efac}#log .ts{color:#64748b}
   .slotcol{width:255px}
+  .sys-row{display:flex;justify-content:space-between;align-items:center;margin:12px 0 4px}
+  .sys-row h3{margin:0}
+  .ts-hdrs{display:flex;flex-shrink:0}
+  .ts-hdr{width:255px;padding-left:10px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -117,8 +121,9 @@ function renderServers(){
   for(const n of names){
     const m=ST.systems[n], repeaters=m.REPEATERS||{}, act=activeBySlot(n);
     const pids=Object.keys(repeaters);
-    h+='<h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' repeater(s)</span></h3>';
-    h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+    h+='<div class="sys-row"><h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' repeater(s)</span></h3>'
+      +'<div class="ts-hdrs"><div class="ts-hdr">TS1</div><div class="ts-hdr">TS2</div></div></div>';
+    h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>Slots</th><th class="slotcol"></th><th class="slotcol"></th></tr>';
     if(!pids.length) h+='<tr><td colspan="6" class="sub">No repeaters connected</td></tr>';
     for(const pid of pids){
       const p=repeaters[pid];
@@ -144,19 +149,24 @@ function fmtFreq(f){ return f && f.length>=7 ? (f.slice(0,3)+'.'+f.slice(3,7)) :
 function renderOutbounds(){
   const names=Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='OUTBOUND');
   if(!names.length){ el('outbounds').innerHTML='<div class="empty">No outbound systems</div>'; return; }
-  let h='<table><tr><th>System</th><th>Identity</th><th>Status</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
+  let h='';
   for(const n of names){
     const s=ST.systems[n], st=s.STATS||{}, act=activeBySlot(n);
     const up = st.CONNECTION==='YES';
     const warn = (st.NUM_OUTSTANDING||0) > 0;
     const nameStyle = warn ? ' style="color:var(--warn)"' : '';
     const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
-    h+='<tr><td class="sysname"'+nameStyle+'>'+esc(n)+'<div class="sub">'+esc(s.MODE)+'</div></td>'+
-       '<td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
+    h+='<div class="sys-row"><h3><span class="sysname"'+nameStyle+'>'+esc(n)+'</span></h3>'
+      +'<div class="ts-hdrs"><div class="ts-hdr">TS1</div><div class="ts-hdr">TS2</div></div></div>';
+    h+='<table><tr><th>Identity</th><th>Status</th><th>Slots</th><th class="slotcol"></th><th class="slotcol"></th></tr>';
+    h+='<tr><td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
        '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+(up?'Connected':'Disconnected')+'</span><div class="sub">up '+since+'</div></td>'+
-       '<td class="mono">'+fmtSlots(s.SLOTS)+'</td><td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx', ST.hang[n+'|1']||null)+'</td><td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx', ST.hang[n+'|2']||null)+'</td></tr>';
+       '<td class="mono">'+fmtSlots(s.SLOTS)+'</td>'+
+       '<td>'+callCell(act[1], act[1]&&act[1].trx==='TX'?'tx':'rx', ST.hang[n+'|1']||null)+'</td>'+
+       '<td>'+callCell(act[2], act[2]&&act[2].trx==='TX'?'tx':'rx', ST.hang[n+'|2']||null)+'</td></tr>';
+    h+='</table>';
   }
-  el('outbounds').innerHTML=h+'</table>';
+  el('outbounds').innerHTML=h;
 }
 
 function renderOpenbridges(){
