@@ -75,7 +75,7 @@
 
 <script>
 const ST = { systems:{}, bridges:{}, active:{}, hang:{}, log:[], hblink:false, ping_time:5, max_missed:3 };
-const STALE = 30000;   // drop an active call this many ms after START if no END arrives
+const STALE = 300000;   // backstop: drop an active call this many ms after START if no END arrives (well above amateur TOT)
 
 // ---------- helpers ----------
 const el = id => document.getElementById(id);

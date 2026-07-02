@@ -65,9 +65,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger('hbdash')
 
 # Drop an "active" stream this many seconds after its START if no END arrives.
-# Real calls end well within this; it clears phantoms left by interrupted calls
-# or a lost/late terminator. (HBlink3's own stream trimmer times out at ~5s.)
-STREAM_STALE = 30
+# This is only a backstop for a lost/never-sent terminator while the feed stays
+# connected -- a dropped feed already clears all active streams on disconnect,
+# and HBlink3 itself synthesizes an END a couple seconds after audio stops
+# (bridge.py STREAM_TIMEOUT). Keep it well above any real transmission (amateur
+# TOT is ~3 min) so legitimate long calls are never clipped mid-stream.
+STREAM_STALE = 300
 
 
 # ---- alias resolution --------------------------------------------------------
