@@ -247,8 +247,7 @@ Practical guidance:
 * If a stanza genuinely uses no ACLs, `USE_ACL: False` skips the subscriber/TGID
   checks entirely (registration is still enforced).
 * Don't hesitate to write expressive ACLs. The design specifically optimizes for
-  exactly this. The "consumes packet processing time" caution in the sample
-  config predates the current implementation; in practice the cost is negligible.
+  exactly this; in practice the cost is negligible.
 
 ---
 
