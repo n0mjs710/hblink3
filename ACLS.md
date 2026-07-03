@@ -62,20 +62,7 @@ So:
 * `DENY:3120100-3120199` means *"block IDs 3120100–3120199, allow everyone
   else."*
 
-This is verified in `acl_check()` — a match returns the ACTION, and a non-match
-returns `not action`:
-
-```python
-def acl_check(_id, _acl):
-    id = int_id(_id)
-    action, singles, starts, ends = _acl
-    if id in singles:
-        return action           # listed  -> the ACTION
-    i = bisect_right(starts, id) - 1
-    if i >= 0 and id <= ends[i]:
-        return action           # listed  -> the ACTION
-    return not action           # unlisted -> the OPPOSITE
-```
+A listed ID gets the ACTION; an unlisted ID gets the opposite.
 
 **Rule of thumb:** use `DENY:` when you want to block a small, known set and let
 everyone else through. Use `PERMIT:` when you want a closed system where only an
@@ -107,8 +94,7 @@ guardrail, not a bug (see [Warnings](#warnings)).
 
 ## 4. Where each ACL is enforced
 
-For an inbound **DMRD voice/data** frame, HBlink3 checks (in order) inside
-`dmrd_acl_check()`:
+For an inbound **DMRD voice/data** frame, HBlink3 checks (in order):
 
 1. GLOBAL `SUB_ACL` — source subscriber
 2. GLOBAL `TGID_TS1_ACL` or `TGID_TS2_ACL` — destination TG, by slot
@@ -118,14 +104,9 @@ For an inbound **DMRD voice/data** frame, HBlink3 checks (in order) inside
 The call is dropped at the **first** ACL that denies it. It must pass **all
 four** to be forwarded.
 
-For **registration** (a repeater logging into a master), HBlink3 checks:
-
-```python
-if acl_check(_peer_id, GLOBAL['REG_ACL']) and acl_check(_peer_id, system['REG_ACL']):
-    # allow registration
-```
-
-Both the GLOBAL and the SYSTEM `REG_ACL` must permit the peer.
+For **registration** (a repeater logging into a master), both the GLOBAL and the
+SYSTEM `REG_ACL` must permit the peer — if either one denies it, the login is
+refused.
 
 ### OpenBridge special case
 
@@ -240,54 +221,34 @@ Write ranges however is clearest to *you*; the engine tidies them up.
 
 ---
 
-## 8. How matching actually works (for the curious)
-
-At startup, `acl_build()` turns each ACL string into a compact structure:
-
-```
-(action, frozenset_of_single_ids, sorted_range_starts, sorted_range_ends)
-```
-
-* **Single IDs** go into a `frozenset` → membership test is O(1).
-* **Ranges** are sorted and merged into disjoint spans by `merge_ranges()`
-  (adjacent ranges, e.g. `1-5` and `6-10`, are fused into `1-10`), then stored as
-  two parallel tuples so `acl_check()` can find any match with **one binary
-  search** (`bisect`), i.e. O(log n).
-
-So per packet, an ACL check is: one hash-set lookup, and one binary search over
-the (already minimized) range list. That's it.
-
----
-
 ## Performance
 
 **Short version: turn ACLs on. They are fast.**
 
-* The parsing/merging work happens **once, at startup** — never on the hot path.
-* Each per-packet check is one set lookup plus one binary search. For a list of
-  *n* merged ranges the search does about **log₂(n)** comparisons: 1,000 ranges
-  is ~10 comparisons, 1,000,000 ranges is ~20. You will not measure the
-  difference on real traffic.
-* Adjacent and overlapping ranges are **merged**, so a config that looks huge
-  often reduces to a handful of spans in memory.
+* All of the work of reading and organizing your ACLs happens **once, when
+  HBlink3 starts** — not while traffic is flowing.
+* Checking a packet is near-instant, and it stays fast no matter how long your
+  lists get. A list with a thousand entries is checked essentially as quickly as
+  a list with ten. You will not see the difference on real traffic.
+* Runs of consecutive IDs are **combined** internally, so a config that looks
+  huge often takes very little memory.
 
 Where cost actually comes from — and it is small:
 
 * **Every enabled ACL type adds one check per packet.** With GLOBAL + SYSTEM
-  layering that's up to four checks per DMRD frame. Constant, tiny, predictable.
-* **Very large lists of thousands of *non-contiguous single IDs*** cost memory
-  (one `frozenset` entry each) and a little startup time, but lookups stay O(1).
+  layering that's up to four checks per frame. Constant, tiny, predictable.
+* **Very large lists of thousands of individual (non-consecutive) IDs** use a
+  little more memory and startup time, but checking them stays fast.
 
 Practical guidance:
 
-* Use ranges instead of enumerating many consecutive IDs — it's less to type and
-  smaller in memory.
+* Use ranges (`1000-2000`) instead of listing many consecutive IDs — it's less to
+  type and smaller in memory.
 * If a stanza genuinely uses no ACLs, `USE_ACL: False` skips the subscriber/TGID
   checks entirely (registration is still enforced).
 * Don't hesitate to write expressive ACLs. The design specifically optimizes for
   exactly this. The "consumes packet processing time" caution in the sample
-  config predates the current bisect/set implementation; in practice the cost is
-  negligible.
+  config predates the current implementation; in practice the cost is negligible.
 
 ---
 
