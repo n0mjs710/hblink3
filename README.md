@@ -126,6 +126,15 @@ be authoritative. User-based mutual support is great, and I'm all for it. But
 please understand, this is what they are, and I have not sanctioned anyone to be
 the "home" of my software packages.
 
+## GitHub "Issues"
+
+Do not use GitHub issues for support. Genuine bugs are accepted as issues. Before 
+opening one, make sure that it is a true problem with the software and not merely
+a misconfiguration, or contention around a feature that was not supported. Isssues
+should never be used to ask for or recommend features. Issues that do not include
+complete details, relevent tracebacks, error messages, configuration snippets, 
+operatrional conditions surrounding the event, etc. will be closed without action.
+
 ## Acknowledgments
 
 The HomeBrew Repeater Protocol is the work of Jonathan Naylor (G4KLX), Hans Barthen (DL5DI), and Torsten Schultze (DG1HT). This project is the author's clean-room interpretation of that protocol.
