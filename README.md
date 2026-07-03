@@ -114,9 +114,17 @@ Copyright (C) 2016-2026 Cortney T. Buffington, N0MJS — n0mjs@me.com
 
 Licensed under the **GNU GPLv3**; see [LICENSE.txt](LICENSE.txt). You may use this software freely, but please credit the project somewhere public (club, organization, or project site) so we can see where it's in use.
 
-## Support & contributing
+### No Support Is Provided
 
-Maintained by one person with limited resources. Genuine bug reports are welcome; please don't open issues for configuration help or feature requests. Discuss new features first and submit pull requests on a feature branch.
+This is not commercial software. It is provided free of charge. The author(s)
+received no compensation for creating and maintaining it. Countless hours over
+many years have gone into the this. If you have problems, the author will try
+to help if possible, please have no expectations for support. There is no online
+group, such as DVSwitch or groups.io that is an "official" outlet for information.
+The only definitive source of information is me. Beware of others claiming to
+be authoritative. User-based mutual support is great, and I'm all for it. But
+please understand, this is what they are, and I have not sanctioned anyone to be
+the "home" of my software packages.
 
 ## Acknowledgments
 
