@@ -1,8 +1,8 @@
 # HBlink3
 
-HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol (HBP)** in Python 3. It acts as an HBP master and/or peer and routes calls between MMDVM-based DMR systems, working as a **transit / conference-bridge router** — traffic is selectively routed from ingress systems to egress systems according to a rules file. It can also link to **Brandmeister** and **DMR+ (IPSC2)** via **OpenBridge**.
+HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol (HBP)** in Python 3. It acts as an HBP server and/or client and routes calls between MMDVM-based DMR systems, working as a **transit / conference-bridge router** — traffic is selectively routed from ingress systems to egress systems according to a rules file. It can also connect to other HBlink3 and similar systems via **OpenBridge**.
 
-> **Which HBlink?** HBlink3 is system-oriented and built for **transit routing and conference bridging** between networks. Its companion, **HBlink4** (by the same author), is a repeater-oriented **endpoint server** for running a single regional network. Pick the one that matches your role.
+> **Which HBlink?** HBlink3 is "system-oriented" and built for **transit routing and conference bridging** between networks. Its companion, **HBlink4** (by the same author), is a repeater-oriented **endpoint server** for running a single end-point network with no granudlar transit routing. Pick the one that matches your role.
 
 ## Applications
 
@@ -14,10 +14,10 @@ HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol
 
 ## Features
 
-- HBP **master** and **peer** modes for MMDVM repeaters and hotspots
-- **OpenBridge** connectivity to Brandmeister / DMR+ (IPSC2)
-- Rules-based **conference-bridge routing** with dynamic ON/OFF/RESET talkgroup triggers and timeouts
-- **Private (unit) call** routing using a learned subscriber-to-system map
+- HBP **server** (master) and **client** (peer) modes for MMDVM repeaters and hotspots
+- **OpenBridge** connectivity to other transit call routers, including Brandmeister / DMR+ (IPSC2)
+- Rules-based **conference-bridge routing** with dynamic ON/OFF/RESET talkgroup triggers and timeouts, including the ability to use TGIDs as in-band signalling to trigger dynamic connections -- sometimes referred to as "dial-a-talkgroup".
+- **Private (unit) call** routing using a learned subscriber-to-system map that only floods systems configured for unit calls, and only until the target unit's system is located. It then prunes re-transmission to the system with the target unit.
 - Layered **access control lists** — registration, subscriber, and per-timeslot talkgroup
 - TCP **reporting feed** for external dashboards
 - Built on Python **`asyncio`** — no external networking framework
@@ -81,37 +81,31 @@ used. Talkgroup IDs not present in the file are displayed as their raw numeric v
 A real-time web dashboard lives in [`dashboard/`](dashboard/) — a separate program
 with a modern dark UI showing master/peer/OpenBridge systems, conference-bridge
 state, and a live call log. Enable HBlink3's reporting feed (`[REPORTS]` in
-`hblink.cfg`) and see [dashboard/README.md](dashboard/README.md) to run it.
+`hblink.cfg`) and see [dashboard/README.md](dashboard/README.md) to run it. the dashboard
+is kept separate to keep performance of the forwarding hot path free from unecessary
+loads.
 
-## Known Limitations
-
-### DMR Talker Alias is not preserved across bridges
+## DMR Talker Alias is not preserved across bridges
 
 When `bridge.py` routes a call to a system with a different TGID or timeslot, it
 rewrites the Link Control (LC) word in every forwarded DMR frame — voice header,
-voice terminator, and the embedded LC carried in voice bursts B–E. This is
-necessary and correct: the translated TGID and source subscriber ID must be
-consistent in the header LC (call setup and late entry), the terminator LC, and
-the embedded LC in intermediate bursts. A mismatch between the header LC and the
-burst-embedded LC would cause late-joining radios to decode the wrong TGID and
-potentially receive or route traffic incorrectly.
+voice terminator, and the embedded LC carried in voice bursts B–E.
 
 The consequence is that **DMR Talker Alias data embedded in voice bursts is
 destroyed during bridging.** Talker Alias occupies the same embedded LC slots
 (FLCO 0x04–0x07 in bursts B–E) that the bridge overwrites with the translated
-call LC. There is no way to preserve both simultaneously.
+call LC.
 
-This is worse when using an IPSC/ipsc2hbp adapter. IPSC carries TA completely
-differently from DMR over-the-air; the adapter must reconstruct HBP frames from
-IPSC data, and any talker-alias LC embedded in those reconstructed frames cannot
-be assumed to match the DMR embedded-LC format that HBlink3 expects.
+This was a consious design decision to ensure every superframe carries full LC
+information -- preferencing voice quality and integrity over all else.
 
-**Workaround:** None at this time. Radios that look up talker alias via the
-RadioID.net database or a local DMR ID file are unaffected.
+**Future:** Currently, most hams appear to prefer/additinoally use a static 
+database for ID to callsign mapping. Inclusion of Talker Alias may be 
+considered in the future.
 
 ## Requirements
 
-- Python **3.8+** (Linux recommended)
+- Python, at least, **3.8+** (Linux recommended)
 - `bitarray`, `dmr_utils3` — see `requirements.txt`
 
 ## License
