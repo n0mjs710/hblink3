@@ -132,7 +132,15 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
 
     def send_system(self, _packet):
         if _packet[:4] == DMRD:
-            _packet = b''.join([_packet[:11], self._config['NETWORK_ID'], _packet[15:]])
+            # OpenBridge convention fills the DMRD "Repeater ID" field (bytes 11-14) with
+            # THIS server's own NETWORK_ID. That field is not validated by the reference
+            # implementation -- authentication is the HMAC (keyed by PASSPHRASE) plus the
+            # source socket -- and it is used here only for logging/reporting. With
+            # PRESERVE_SOURCE_PEER = True we leave the originating repeater/peer ID intact
+            # so it propagates end-to-end instead of being replaced by our server ID.
+            # Default False keeps the spec-conventional behavior.
+            if not self._config['PRESERVE_SOURCE_PEER']:
+                _packet = b''.join([_packet[:11], self._config['NETWORK_ID'], _packet[15:]])
             _packet = b''.join([_packet, (hmac_new(self._config['PASSPHRASE'],_packet,sha1).digest())])
             self.transport.sendto(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
         else:
