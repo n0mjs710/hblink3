@@ -92,7 +92,9 @@ Maps DMR IDs to callsigns/names so logs read as `N0MJS` instead of `3120001`. Th
 > in the main program **only** if the subscriber file has been **heavily filtered** to a
 > much smaller size first — use the dashboard's `FILTER_COUNTRIES` (in `dashboard/config.py`),
 > which writes only the selected countries to disk; both programs then load that smaller
-> file. An unfiltered global load in two processes is almost never worth the gigabyte.
+> file. Filtered to a country or two, the footprint drops to roughly **150 MB**; it's the
+> *unfiltered* global load in two processes that costs the gigabyte and is almost never
+> worth it.
 
 ## System stanzas
 

@@ -30,9 +30,11 @@ LOG_LINES       = 300                   # Number of recent call-log entries to r
 # refresh them daily. Set False to manage files manually or skip alias lookups.
 #
 # NOTE: HBlink3/bridge.py can also load these files for callsign display in
-# logs, but doing so costs ~150 MB of RAM and is STRONGLY DISCOURAGED. If you
-# want log callsigns, point bridge.py's [ALIASES] PATH at this directory and
-# keep TRY_DOWNLOAD: False there — the dashboard handles the downloads.
+# logs, but doing so costs RAM — roughly 150 MB with the country filter below,
+# ~500 MB unfiltered, and that again in the dashboard process if it loads them
+# too — so it is STRONGLY DISCOURAGED. If you want log callsigns, point
+# bridge.py's [ALIASES] PATH at this directory and keep TRY_DOWNLOAD: False
+# there — the dashboard handles the downloads.
 TRY_DOWNLOAD    = True
 PATH            = './'                  # MUST END IN '/' — dashboard's own directory
 PEER_FILE       = 'peer_ids.json'
