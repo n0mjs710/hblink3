@@ -239,12 +239,12 @@ def stream_trimmer_loop():
                     _sysconfig = CONFIG['SYSTEMS'][system]
                     if systems[system].STATUS[stream_id]['ACTIVE']:
                         logger.info('(%s) *TIME OUT*   STREAM ID: %s SUB: %s PEER: %s TYPE: %s DST ID: %s TS 1 Duration: %.2f', \
-                        system, int_id(stream_id), get_alias(int_id(_stream['RFS']), subscriber_ids), get_alias(int_id(_sysconfig['NETWORK_ID']), peer_ids), _stream['TYPE'], get_alias(int_id(_stream['DST']), talkgroup_ids), _stream['LAST'] - _stream['START'])
+                        system, int_id(stream_id), get_alias(int_id(_stream['RFS']), subscriber_ids), get_alias(int_id(_stream.get('PEER', _sysconfig['NETWORK_ID'])), peer_ids), _stream['TYPE'], get_alias(int_id(_stream['DST']), talkgroup_ids), _stream['LAST'] - _stream['START'])
                     if CONFIG['REPORTS']['REPORT']:
                             if _stream['TYPE'] == 'GROUP':
-                                systems[system]._report.send_bridge_event('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(system, int_id(stream_id), int_id(_sysconfig['NETWORK_ID']), int_id(_stream['RFS']), 1, int_id(_stream['DST']), _stream['LAST'] - _stream['START']).encode(encoding='utf-8', errors='ignore'))
+                                systems[system]._report.send_bridge_event('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(system, int_id(stream_id), int_id(_stream.get('PEER', _sysconfig['NETWORK_ID'])), int_id(_stream['RFS']), 1, int_id(_stream['DST']), _stream['LAST'] - _stream['START']).encode(encoding='utf-8', errors='ignore'))
                             elif _stream['TYPE'] == 'UNIT':
-                                systems[system]._report.send_bridge_event('UNIT VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(system, int_id(stream_id), int_id(_sysconfig['NETWORK_ID']), int_id(_stream['RFS']), 1, int_id(_stream['DST']), _stream['LAST'] - _stream['START']).encode(encoding='utf-8', errors='ignore'))
+                                systems[system]._report.send_bridge_event('UNIT VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(system, int_id(stream_id), int_id(_stream.get('PEER', _sysconfig['NETWORK_ID'])), int_id(_stream['RFS']), 1, int_id(_stream['DST']), _stream['LAST'] - _stream['START']).encode(encoding='utf-8', errors='ignore'))
                     removed = systems[system].STATUS.pop(stream_id)
                 else:
                     logger.error('(%s) Attemped to remove OpenBridge Stream ID %s not in the Stream ID list: %s', system, int_id(stream_id), [id for id in systems[system].STATUS])
@@ -271,6 +271,7 @@ class routerOBP(OPENBRIDGE):
                 'START':     pkt_time,
                 'CONTENTION':False,
                 'RFS':       _rf_src,
+                'PEER':      _peer_id,      # remember source peer so the timeout-cleanup report matches START
                 'TYPE':      'GROUP',
                 'DST':       _dst_id,
                 'ACTIVE':    True
@@ -387,6 +388,7 @@ class routerOBP(OPENBRIDGE):
                 'START':     pkt_time,
                 'CONTENTION':False,
                 'RFS':       _rf_src,
+                'PEER':      _peer_id,      # remember source peer so the timeout-cleanup report matches START
                 'TYPE':      'UNIT',
                 'DST':       _dst_id,
                 'ACTIVE':    True
