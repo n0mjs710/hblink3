@@ -24,6 +24,15 @@ WEB_PORT        = 8080                  # Port (must be > 1024 if not running as
 # Call log
 LOG_LINES       = 300                   # Number of recent call-log entries to retain
 
+# Last Heard table — most-recent unique callers, shown at the top of the dashboard.
+LAST_HEARD       = 'open'               # 'open' | 'closed' | 'off'  (default state; 'off' hides it entirely)
+LAST_HEARD_COUNT = 10                   # Number of recent callers to list
+
+# Server systems — default state for each server system's collapsible repeater list.
+# Users can toggle each system open/closed in their own browser (remembered locally).
+# When collapsed, system-level TS1/TS2 activity pills replace the repeater table.
+SERVER_REPEATERS = 'open'               # 'open' | 'closed'  ('closed' gives a compact view for many-repeater servers)
+
 # Alias files — the dashboard owns downloading, storing, and refreshing these.
 # Files live in the dashboard's own subdirectory (PATH = './') by default.
 # Set TRY_DOWNLOAD = True to fetch fresh files from radioid.net on startup and

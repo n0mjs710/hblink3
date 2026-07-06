@@ -21,6 +21,24 @@ shows green, and everyone hearing the repeated copy shows red.
 
 ---
 
+## Last Heard
+
+The most-recent unique callers, newest first, derived live from the call log
+(no separate database). Deduplicated by source radio ID. Configure with
+`LAST_HEARD` / `LAST_HEARD_COUNT`; the **Show/Hide** button collapses the table
+and its state is remembered in your browser.
+
+| Column | Meaning |
+|---|---|
+| User | The caller's callsign and radio ID (DMR ID). |
+| Type | Call type — Group Voice, Unit Voice, Group Data, or Unit Data. |
+| Source | The source repeater/peer the call entered on (callsign and ID if known). |
+| TS | The timeslot the call used. |
+| Talkgroup | The destination talkgroup (name and ID), or subscriber for a unit call. |
+| When | **Active** while the call is in progress, otherwise how long ago it was heard. |
+
+---
+
 ## Master Systems
 
 One block per HBlink3 **MASTER** instance (repeaters/hotspots connect *to* it).
@@ -32,6 +50,7 @@ One block per HBlink3 **MASTER** instance (repeaters/hotspots connect *to* it).
 | System name | The master's name from `hblink.cfg` (e.g. `MASTER-1`). |
 | `repeat` / `isolate` pill | `repeat` if the master forwards traffic between its own peers (`REPEAT: True`), `isolate` if it does not. |
 | *N* peer(s) | How many repeaters/hotspots are currently logged in. |
+| Show/Hide Connections | Collapses this system's connection table. When collapsed, system-level TS1/TS2 activity pills replace it so live calls stay visible. Default from `SERVER_REPEATERS`; per-system state is remembered in your browser. |
 
 **Per-peer row**
 

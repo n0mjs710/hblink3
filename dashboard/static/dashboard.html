@@ -54,6 +54,15 @@
   .sys-row h3{margin:0}
   .ts-hdrs{display:flex;flex-shrink:0}
   .ts-hdr{width:255px;padding-left:10px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;box-sizing:border-box}
+  .sys-block .sys-pills{display:none}                                   /* system pills hidden while expanded */
+  .sys-block.collapsed .sys-pills{display:flex;justify-content:flex-end;margin:0 0 12px}
+  .sys-block.collapsed table{display:none}                              /* hide repeater table when collapsed */
+  .sys-pills .slotcol{padding-left:10px;box-sizing:border-box}
+  .lh-head{display:flex;align-items:center;gap:10px}
+  .toggle-btn{cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--accent);background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;text-transform:none;letter-spacing:0}
+  .toggle-btn:hover{border-color:var(--accent)}
+  .toggle-btn .caret{font-size:11px;line-height:1}
+  #lastHeardBody.hidden{display:none}
 </style>
 </head>
 <body>
@@ -66,6 +75,7 @@
     <div id="conn" class="badge down">HBlink: connecting…</div>
   </header>
 
+  <section id="lastHeardSection"><h2 class="lh-head">Last Heard <span id="lastHeardToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="lastHeardBody"><div id="lastHeard"></div></div></section>
   <section><h2>Server Systems</h2><div id="servers"></div></section>
   <section><h2>Outbound Systems</h2><div id="outbounds"></div></section>
   <section><h2>OpenBridge Systems</h2><div id="openbridges"></div></section>
@@ -76,6 +86,9 @@
 <script>
 const ST = { systems:{}, bridges:{}, active:{}, hang:{}, log:[], hblink:false, ping_time:5, max_missed:3 };
 const STALE = 300000;   // backstop: drop an active call this many ms after START if no END arrives (well above amateur TOT)
+const LAST_HEARD_CFG   = '{{LAST_HEARD}}';                    // 'open' | 'closed' | 'off'
+const LAST_HEARD_COUNT = parseInt('{{LAST_HEARD_COUNT}}', 10) || 10;
+const SERVER_REPEATERS_CFG = '{{SERVER_REPEATERS}}';         // 'open' | 'closed' — default state for server-system repeater lists
 
 // ---------- helpers ----------
 const el = id => document.getElementById(id);
@@ -114,6 +127,27 @@ function callCell(e, klass, hang){
 }
 
 // ---------- renderers ----------
+// ---- per-server-system repeater-list collapse (persisted per browser; SERVER_REPEATERS sets the default) ----
+function srvCollapsedStore(){ try{ return JSON.parse(localStorage.getItem('hbl_srv_collapsed')||'{}'); }catch(e){ return {}; } }
+function srvIsCollapsed(n){
+  const st = srvCollapsedStore();
+  return Object.prototype.hasOwnProperty.call(st, n) ? !!st[n] : (SERVER_REPEATERS_CFG==='closed');
+}
+function srvSetCollapsed(n, val){
+  const st = srvCollapsedStore(); st[n] = val;
+  localStorage.setItem('hbl_srv_collapsed', JSON.stringify(st));
+}
+function initServersCollapse(){
+  // Delegated so it survives renderServers() rebuilding #servers on every event.
+  el('servers').addEventListener('click', ev=>{
+    const btn = ev.target.closest('.srv-toggle'); if(!btn) return;
+    const block = btn.closest('.sys-block'); if(!block) return;
+    const n = block.dataset.sys;
+    srvSetCollapsed(n, !srvIsCollapsed(n));
+    renderServers();
+  });
+}
+
 function renderServers(){
   const names = Object.keys(ST.systems).filter(n=>ST.systems[n].MODE==='SERVER');
   if(!names.length){ el('servers').innerHTML='<div class="empty">No server systems</div>'; return; }
@@ -121,8 +155,16 @@ function renderServers(){
   for(const n of names){
     const m=ST.systems[n], repeaters=m.REPEATERS||{}, act=activeBySlot(n);
     const pids=Object.keys(repeaters);
-    h+='<div class="sys-row"><h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' repeater(s)</span></h3>'
-      +'<div class="ts-hdrs"><div class="ts-hdr">TS1</div><div class="ts-hdr">TS2</div></div></div>';
+    // System-level slot pill, shown only when the repeater table is collapsed.
+    // Coloured by the call's own direction (system view has no per-repeater source).
+    const sysPill=(slot)=>{ const e=act[slot], hang=ST.hang[n+'|'+slot]||null;
+      return callCell(e||null, e?(e.trx==='TX'?'tx':'rx'):null, hang); };
+    const collapsed=srvIsCollapsed(n);
+    h+='<div class="sys-block'+(collapsed?' collapsed':'')+'" data-sys="'+esc(n)+'">';
+    h+='<div class="sys-row"><h3><span class="sysname">'+esc(n)+'</span> <span class="pill">'+(m.REPEAT?'repeat':'isolate')+'</span> <span class="sub">'+pids.length+' repeater(s)</span> '
+      +'<span class="toggle-btn srv-toggle" title="Show or hide this system’s connections"><span class="caret">'+(collapsed?'▸':'▾')+'</span>'+(collapsed?'Show Connections':'Hide Connections')+'</span></h3>'
+      +'<div class="ts-hdrs"><div class="ts-hdr">TS1</div><div class="ts-hdr">TS2</div></div></div>'
+      +'<div class="sys-pills"><div class="slotcol">'+sysPill(1)+'</div><div class="slotcol">'+sysPill(2)+'</div></div>';
     h+='<table><tr><th>Repeater</th><th>Connection</th><th>Freq</th><th>Slots</th><th class="slotcol"></th><th class="slotcol"></th></tr>';
     if(!pids.length) h+='<tr><td colspan="6" class="sub">No repeaters connected</td></tr>';
     for(const pid of pids){
@@ -141,6 +183,7 @@ function renderServers(){
          '<td>'+cell(1)+'</td><td>'+cell(2)+'</td></tr>';
     }
     h+='</table>';
+    h+='</div>';   // close .sys-block (collapsible repeater list)
   }
   el('servers').innerHTML=h;
 }
@@ -215,6 +258,55 @@ function logRow(e){
 }
 function renderLog(){ el('log').innerHTML = ST.log.map(logRow).join(''); }
 
+// ---------- last heard ----------
+// Most-recent unique callers, derived from the RX (ingress) call log — no server
+// state of its own. Deduped by source radio ID, newest first.
+function lhActiveSrc(src){ for(const k in ST.active){ if(String(ST.active[k].src)===String(src)) return true; } return false; }
+function renderLastHeard(){
+  const box = el('lastHeard'); if(!box) return;
+  const seen = {}, rows = [];
+  for(const e of ST.log){
+    const id = e.src==null ? '' : String(e.src);
+    if(!id || seen[id]) continue;
+    seen[id] = 1; rows.push(e);
+    if(rows.length >= LAST_HEARD_COUNT) break;
+  }
+  if(!rows.length){ box.innerHTML = '<div class="empty">No calls heard yet</div>'; return; }
+  let h = '<table><tr><th>User</th><th>Type</th><th>Source</th><th>TS</th><th>Talkgroup</th><th>When</th></tr>';
+  for(const e of rows){
+    const src = e.peer!=null ? idName(e.peer_alias, e.peer) : esc(e.system||'');
+    const t = e._ts ? e._ts*1000 : (e._arrived||Date.now());
+    const when = lhActiveSrc(e.src)
+      ? '<span class="status-ok">Active</span>'
+      : '<span class="js-lh mono" data-t="'+t+'">'+dur((Date.now()-t)/1000)+' ago</span>';
+    h += '<tr><td>'+idName(e.src_alias,e.src)+'</td>'
+       + '<td class="sub">'+callShort(e.call_type)+'</td>'
+       + '<td class="mono sub">'+src+'</td>'
+       + '<td class="mono">TS'+esc(e.slot||'?')+'</td>'
+       + '<td>'+idName(e.dst_alias,e.dst)+'</td>'
+       + '<td>'+when+'</td></tr>';
+  }
+  box.innerHTML = h+'</table>';
+}
+function setLastHeardOpen(open){
+  el('lastHeardBody').classList.toggle('hidden', !open);
+  const t = el('lastHeardToggle');
+  t.querySelector('.caret').textContent = open ? '▾' : '▸';
+  t.querySelector('.toggle-label').textContent = open ? 'Hide' : 'Show';
+}
+function initLastHeard(){
+  const sec = el('lastHeardSection'); if(!sec) return;
+  if(LAST_HEARD_CFG==='off'){ sec.style.display='none'; return; }
+  const saved = localStorage.getItem('lastHeardOpen');       // per-browser override wins over config default
+  setLastHeardOpen(saved==null ? (LAST_HEARD_CFG!=='closed') : (saved==='1'));
+  el('lastHeardToggle').addEventListener('click', ()=>{
+    const open = el('lastHeardBody').classList.contains('hidden');   // currently hidden → we're opening it
+    setLastHeardOpen(open);
+    localStorage.setItem('lastHeardOpen', open?'1':'0');
+  });
+  renderLastHeard();
+}
+
 // ---------- live tick ----------
 setInterval(()=>{
   const now=Date.now();
@@ -226,11 +318,12 @@ setInterval(()=>{
   document.querySelectorAll('.js-since').forEach(s=>{ s.textContent=dur((+s.dataset.base)+(now-(+s.dataset.arr))/1000); });
   document.querySelectorAll('.js-dur').forEach(s=>{ s.textContent=dur((now-(+s.dataset.start))/1000); });
   document.querySelectorAll('.js-countdown').forEach(s=>{ const r=(+s.dataset.rem)-(now-(+s.dataset.arr))/1000; s.textContent=r<=0?'expired':dur(r); });
+  document.querySelectorAll('.js-lh').forEach(s=>{ s.textContent=dur((now-(+s.dataset.t))/1000)+' ago'; });
 },1000);
 
 // ---------- websocket ----------
 function setConn(up){ ST.hblink=up; const c=el('conn'); c.className='badge '+(up?'up':'down'); c.textContent='HBlink: '+(up?'connected':'disconnected'); }
-function renderAll(){ renderServers(); renderOutbounds(); renderOpenbridges(); renderBridges(); renderLog(); }
+function renderAll(){ renderServers(); renderOutbounds(); renderOpenbridges(); renderBridges(); renderLog(); renderLastHeard(); }
 
 function applyStream(e){
   e._arrived = e._arrived || Date.now();
@@ -243,7 +336,7 @@ function applyStream(e){
     const ht = (ST.systems[e.system]||{}).GROUP_HANGTIME||0;
     if(ht>0) ST.hang[hkey] = Object.assign({}, e, {_expires: Date.now()/1000 + ht});
   }
-  if(e.trx==='RX'){ ST.log.unshift(e); if(ST.log.length>400) ST.log.pop(); renderLog(); }
+  if(e.trx==='RX'){ ST.log.unshift(e); if(ST.log.length>400) ST.log.pop(); renderLog(); renderLastHeard(); }
   // re-render the affected system class
   const sys=ST.systems[e.system];
   if(sys&&sys.MODE==='SERVER') renderServers();
@@ -355,6 +448,8 @@ if(new URLSearchParams(location.search).has('demo')){
 } else {
   connect();
 }
+initLastHeard();
+initServersCollapse();
 </script>
 </body>
 </html>

@@ -11,9 +11,15 @@ full-table refreshes, and no pickle on the wire.
 
 ## What it shows
 
+- **Last Heard** — the most-recent unique callers (user, call type, source
+  repeater, timeslot, talkgroup, and when), derived live from the call log. The
+  table is collapsible; its open/closed state is remembered in your browser.
 - **Master Systems** — each master and its connected repeaters (ID, callsign,
   location, IP, uptime, frequency, colorcode, slots) with the live call on each
-  timeslot (source → destination, color-coded by direction).
+  timeslot (source → destination, color-coded by direction). Each server's
+  connection list can be collapsed with the **Show/Hide Connections** button;
+  when collapsed, system-level TS1/TS2 activity pills replace the table so you
+  still see what's talking. State is remembered per-browser.
 - **Peer Systems** — outbound peer connections with health (connection state,
   pings sent/ackd/lost) and live per-timeslot calls.
 - **OpenBridge Systems** — network ID, target, and active streams.
@@ -44,6 +50,12 @@ Open `http://<host>:8080`.
 - `PATH` / `*_FILE` — alias files mapping DMR IDs to callsigns/talkgroup names
   (the same files HBlink3 uses; point `PATH` at HBlink3's directory to share them).
 - `REPORT_NAME`, `LOG_LINES` — branding and call-log length.
+- `LAST_HEARD` — default state of the Last Heard table: `'open'`, `'closed'`, or
+  `'off'` (omit it entirely). Users can still toggle it in their own browser.
+- `LAST_HEARD_COUNT` — number of recent callers to list (default 10).
+- `SERVER_REPEATERS` — default state of each server system's connection list:
+  `'open'` or `'closed'`. Use `'closed'` for a compact view on many-repeater
+  servers; per-system browser choices override it.
 
 ## HBlink3 side
 

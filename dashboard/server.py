@@ -61,6 +61,17 @@ try:
 except ImportError:
     FILTER_COUNTRIES = None
 
+try:
+    from config import LAST_HEARD, LAST_HEARD_COUNT
+except ImportError:
+    LAST_HEARD = 'open'
+    LAST_HEARD_COUNT = 10
+
+try:
+    from config import SERVER_REPEATERS
+except ImportError:
+    SERVER_REPEATERS = 'open'
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('hbdash')
 
@@ -233,6 +244,7 @@ async def handle_event(evt):
         await broadcast({'type': 'bridges', 'bridges': STATE.bridges})
     elif t == 'stream':
         enrich_stream(evt)
+        evt['_ts'] = time.time()   # authoritative server time so "Last Heard" age is correct across reloads
         key = stream_key(evt)
         if evt['action'] == 'START':
             evt['_seen'] = time.time()
@@ -306,7 +318,11 @@ app = FastAPI(lifespan=lifespan)
 async def index():
     with open(os.path.join(STATIC, 'dashboard.html'), encoding='utf-8') as f:
         html = f.read()
-    return html.replace('{{REPORT_NAME}}', REPORT_NAME).replace('{{LOGO_HTML}}', LOGO_HTML)
+    return (html.replace('{{REPORT_NAME}}', REPORT_NAME)
+                .replace('{{LOGO_HTML}}', LOGO_HTML)
+                .replace('{{LAST_HEARD}}', str(LAST_HEARD))
+                .replace('{{LAST_HEARD_COUNT}}', str(LAST_HEARD_COUNT))
+                .replace('{{SERVER_REPEATERS}}', str(SERVER_REPEATERS)))
 
 @app.get('/logo')
 async def serve_logo():
