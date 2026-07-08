@@ -62,7 +62,7 @@
   .toggle-btn{cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--accent);background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;text-transform:none;letter-spacing:0}
   .toggle-btn:hover{border-color:var(--accent)}
   .toggle-btn .caret{font-size:11px;line-height:1}
-  #lastHeardBody.hidden{display:none}
+  .sec-body.hidden{display:none}
 </style>
 </head>
 <body>
@@ -75,12 +75,12 @@
     <div id="conn" class="badge down">HBlink: connecting…</div>
   </header>
 
-  <section id="lastHeardSection"><h2 class="lh-head">Last Heard <span id="lastHeardToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="lastHeardBody"><div id="lastHeard"></div></div></section>
-  <section><h2>Server Systems</h2><div id="servers"></div></section>
-  <section><h2>Outbound Systems</h2><div id="outbounds"></div></section>
-  <section><h2>OpenBridge Systems</h2><div id="openbridges"></div></section>
-  <section><h2>Conference Bridges</h2><div id="bridges"></div></section>
-  <section><h2>Call Log</h2><div id="log"></div></section>
+  <section id="lastHeardSection"><h2 class="lh-head"><span id="lastHeardTitle">Last Heard</span> <span id="lastHeardToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Active only</span></span></h2><div id="lastHeardBody"><div id="lastHeard"></div></div></section>
+  <section id="serversSection"><h2 class="lh-head">Server Systems <span id="serversToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="serversBody" class="sec-body"><div id="servers"></div></div></section>
+  <section id="outboundsSection"><h2 class="lh-head">Outbound Systems <span id="outboundsToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="outboundsBody" class="sec-body"><div id="outbounds"></div></div></section>
+  <section id="openbridgesSection"><h2 class="lh-head">OpenBridge Systems <span id="openbridgesToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="openbridgesBody" class="sec-body"><div id="openbridges"></div></div></section>
+  <section id="bridgesSection"><h2 class="lh-head">Conference Bridges <span id="bridgesToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="bridgesBody" class="sec-body"><div id="bridges"></div></div></section>
+  <section id="logSection"><h2 class="lh-head">Call Log <span id="logToggle" class="toggle-btn"><span class="caret">▾</span><span class="toggle-label">Hide</span></span></h2><div id="logBody" class="sec-body"><div id="log"></div></div></section>
 </div>
 
 <script>
@@ -199,9 +199,9 @@ function renderOutbounds(){
     const warn = (st.NUM_OUTSTANDING||0) > 0;
     const nameStyle = warn ? ' style="color:var(--warn)"' : '';
     const since = st.connected_secs!=null ? '<span class="js-since" data-base="'+st.connected_secs+'" data-arr="'+Date.now()+'">'+dur(st.connected_secs)+'</span>' : '—';
-    h+='<div class="sys-row"><h3><span class="sysname"'+nameStyle+'>'+esc(n)+'</span></h3>'
-      +'<div class="ts-hdrs"><div class="ts-hdr">TS1</div><div class="ts-hdr">TS2</div></div></div>';
-    h+='<table><tr><th>Identity</th><th>Status</th><th>Slots</th><th class="slotcol"></th><th class="slotcol"></th></tr>';
+    // Single-entry system: fold the name into the header row (col 1) and the
+    // TS1/TS2 labels into the slot-column headers, dropping the separate sys-row.
+    h+='<table><tr><th class="sysname"'+nameStyle+'>'+esc(n)+'</th><th>Status</th><th>Slots</th><th class="slotcol">TS1</th><th class="slotcol">TS2</th></tr>';
     h+='<tr><td>'+idName(s.CALLSIGN,s.RADIO_ID)+'<div class="sub">'+esc(s.LOCATION||'')+' · server '+esc(s.SERVER_IP)+':'+esc(s.SERVER_PORT)+'</div></td>'+
        '<td><span class="dot '+(up?'ok':'bad')+'"></span><span class="'+(up?'status-ok':'status-bad')+'">'+(up?'Connected':'Disconnected')+'</span><div class="sub">up '+since+'</div></td>'+
        '<td class="mono">'+fmtSlots(s.SLOTS)+'</td>'+
@@ -268,10 +268,11 @@ function renderLastHeard(){
   for(const e of ST.log){
     const id = e.src==null ? '' : String(e.src);
     if(!id || seen[id]) continue;
+    if(lastHeardCollapsed && !lhActiveSrc(e.src)) continue;   // "Active Calls" view: live streams only
     seen[id] = 1; rows.push(e);
     if(rows.length >= LAST_HEARD_COUNT) break;
   }
-  if(!rows.length){ box.innerHTML = '<div class="empty">No calls heard yet</div>'; return; }
+  if(!rows.length){ box.innerHTML = '<div class="empty">'+(lastHeardCollapsed?'No active calls':'No calls heard yet')+'</div>'; return; }
   let h = '<table><tr><th>User</th><th>Type</th><th>Source</th><th>TS</th><th>Talkgroup</th><th>When</th></tr>';
   for(const e of rows){
     const src = e.peer!=null ? idName(e.peer_alias, e.peer) : esc(e.system||'');
@@ -288,23 +289,44 @@ function renderLastHeard(){
   }
   box.innerHTML = h+'</table>';
 }
-function setLastHeardOpen(open){
-  el('lastHeardBody').classList.toggle('hidden', !open);
+// Collapsing Last Heard doesn't hide it — it filters to an "Active Calls" view
+// (live streams only) and retitles the header. Expanded shows the full list.
+let lastHeardCollapsed = false;
+function applyLastHeard(collapsed){
+  lastHeardCollapsed = collapsed;
+  el('lastHeardTitle').textContent = collapsed ? 'Active Calls' : 'Last Heard';
   const t = el('lastHeardToggle');
-  t.querySelector('.caret').textContent = open ? '▾' : '▸';
-  t.querySelector('.toggle-label').textContent = open ? 'Hide' : 'Show';
+  t.querySelector('.caret').textContent = collapsed ? '▸' : '▾';
+  t.querySelector('.toggle-label').textContent = collapsed ? 'Show all' : 'Active only';
+  renderLastHeard();
 }
 function initLastHeard(){
   const sec = el('lastHeardSection'); if(!sec) return;
   if(LAST_HEARD_CFG==='off'){ sec.style.display='none'; return; }
-  const saved = localStorage.getItem('lastHeardOpen');       // per-browser override wins over config default
-  setLastHeardOpen(saved==null ? (LAST_HEARD_CFG!=='closed') : (saved==='1'));
+  const saved = localStorage.getItem('lastHeardOpen');       // '1' = full list, '0' = active-only; else config default
+  applyLastHeard(saved==null ? (LAST_HEARD_CFG==='closed') : (saved==='0'));
   el('lastHeardToggle').addEventListener('click', ()=>{
-    const open = el('lastHeardBody').classList.contains('hidden');   // currently hidden → we're opening it
-    setLastHeardOpen(open);
-    localStorage.setItem('lastHeardOpen', open?'1':'0');
+    const collapsed = !lastHeardCollapsed;
+    applyLastHeard(collapsed);
+    localStorage.setItem('lastHeardOpen', collapsed?'0':'1');
   });
-  renderLastHeard();
+}
+// Simple collapsible sections (hide the body). Persisted per browser.
+function initCollapse(key, bodyId, toggleId, defCollapsed){
+  const body = el(bodyId), btn = el(toggleId);
+  if(!body || !btn) return;
+  const apply = c => {
+    body.classList.toggle('hidden', c);
+    btn.querySelector('.caret').textContent = c ? '▸' : '▾';
+    btn.querySelector('.toggle-label').textContent = c ? 'Show' : 'Hide';
+  };
+  const saved = localStorage.getItem('collapse:'+key);       // '1' = collapsed, '0' = shown; else default
+  apply(saved==null ? !!defCollapsed : saved==='1');
+  btn.addEventListener('click', ()=>{
+    const collapsed = !body.classList.contains('hidden');    // currently shown → we're collapsing
+    localStorage.setItem('collapse:'+key, collapsed?'1':'0');
+    apply(collapsed);
+  });
 }
 
 // ---------- live tick ----------
@@ -450,6 +472,11 @@ if(new URLSearchParams(location.search).has('demo')){
 }
 initLastHeard();
 initServersCollapse();
+initCollapse('servers','serversBody','serversToggle', false);
+initCollapse('outbounds','outboundsBody','outboundsToggle', false);
+initCollapse('openbridges','openbridgesBody','openbridgesToggle', false);
+initCollapse('bridges','bridgesBody','bridgesToggle', false);
+initCollapse('log','logBody','logToggle', false);
 </script>
 </body>
 </html>
