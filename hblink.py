@@ -37,6 +37,7 @@ from hmac import new as hmac_new, compare_digest
 from time import time
 from collections import deque
 import asyncio
+import socket
 from bisect import bisect_right
 
 # Other files we pull from -- this is mostly for readability and segmentation
@@ -765,6 +766,32 @@ def json_systems(_systems):
     return out
 
 
+# Turn on TCP keepalive with aggressive timers so a silently-severed
+# connection (NIC/interface flap, DHCP renew, firewall/conntrack eviction,
+# router reboot -- anything that drops the flow without a clean FIN/RST) is
+# detected by the OS within ~2 minutes instead of the default ~2 hours. The
+# transport then errors, which unblocks the read loop and sheds the client.
+# Only meaningful for non-loopback connections; harmless on loopback.
+def _enable_tcp_keepalive(_writer, _idle=60, _intvl=15, _cnt=4):
+    sock = _writer.get_extra_info('socket')
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        if hasattr(socket, 'TCP_KEEPIDLE'):     # Linux
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, _idle)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, _intvl)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, _cnt)
+    except OSError as e:
+        logger.warning('(REPORT) Could not set TCP keepalive: %s', e)
+
+
+# Drop a client whose outbound buffer has grown past this, i.e. it is not
+# reading -- a stuck/dead peer we haven't detected yet. Bounds memory so one
+# wedged dashboard can't grow hblink3 without limit.
+_REPORT_WRITE_BUFFER_LIMIT = 1 << 20   # 1 MiB
+
+
 class ReportServer:
     def __init__(self, _config):
         self._config = _config
@@ -792,6 +819,7 @@ class ReportServer:
             writer.close()
             return
         logger.info('(REPORT) Reporting client connected: %s:%s', addr[0], addr[1])
+        _enable_tcp_keepalive(writer)
         self.clients.append(writer)
         self.send_config()
         self.send_bridge()
@@ -818,7 +846,21 @@ class ReportServer:
         data = (json.dumps(obj) + '\n').encode()
         dead = []
         for writer in self.clients:
+            # StreamWriter.write() buffers and almost never raises for a broken
+            # peer, so a dead connection is caught two other ways: is_closing()
+            # (set once the OS/keepalive has errored the transport) and an
+            # over-limit write buffer (the client has stopped reading).
+            if writer.is_closing():
+                dead.append(writer)
+                continue
             try:
+                transport = writer.transport
+                if transport is not None and \
+                        transport.get_write_buffer_size() > _REPORT_WRITE_BUFFER_LIMIT:
+                    logger.warning('(REPORT) Dropping unresponsive client %s (write buffer over limit)',
+                                   writer.get_extra_info('peername'))
+                    dead.append(writer)
+                    continue
                 writer.write(data)
             except Exception as e:
                 logger.warning('(REPORT) Write error: %s', e)
@@ -826,6 +868,10 @@ class ReportServer:
         for w in dead:
             if w in self.clients:
                 self.clients.remove(w)
+            try:
+                w.close()
+            except Exception:
+                pass
 
     def send_config(self):
         self._send_json({

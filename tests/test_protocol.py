@@ -7,6 +7,7 @@
 #
 # Run from the repo root:   venv/bin/python -m unittest discover -s tests
 
+import asyncio
 import json
 import logging
 import os
@@ -100,36 +101,88 @@ class TestMasterHandshake(unittest.TestCase):
         self.assertEqual(m.transport.sent[-1][0][:6], MSTNAK)
 
 
+class MockWriteTransport:
+    """Mimics enough of an asyncio Transport for ReportServer._send_json."""
+    def __init__(self, buffer_size=0):
+        self._buffer_size = buffer_size
+
+    def get_write_buffer_size(self):
+        return self._buffer_size
+
+
+class MockAsyncWriter:
+    """Mimics enough of an asyncio StreamWriter for ReportServer."""
+    def __init__(self, peername=('127.0.0.1', 51000), closing=False, buffer_size=0):
+        self.written = bytearray()
+        self._peername = peername
+        self._closing = closing
+        self.closed = False
+        self.transport = MockWriteTransport(buffer_size)
+
+    def write(self, data):
+        self.written += data
+
+    def is_closing(self):
+        return self._closing
+
+    def close(self):
+        self.closed = True
+        self._closing = True
+
+    def get_extra_info(self, key):
+        # 'socket' returns None so keepalive tuning is skipped in tests.
+        return {'peername': self._peername, 'socket': None}.get(key)
+
+
+class MockAsyncReader:
+    """Async reader that yields the given chunks then EOF (b'')."""
+    def __init__(self, chunks=()):
+        self._chunks = list(chunks)
+
+    async def read(self, _n):
+        return self._chunks.pop(0) if self._chunks else b''
+
+
 class TestReportingNDJSON(unittest.TestCase):
-    def _client(self, peer=('127.0.0.1', 51000)):
-        factory = hblink.reportFactory(CFG)
-        proto = factory()                      # factory is callable -> report instance
-        proto.connection_made(MockStreamTransport(peer))
-        return factory, proto
+    # Exercises the asyncio ReportServer: the client ACL, and the write path's
+    # shedding of dead/unresponsive clients (is_closing() or an over-limit write
+    # buffer). Uses mock reader/writer objects -- no real sockets or config.
+    def _server(self):
+        return hblink.ReportServer({})
 
-    def test_disallowed_client_is_closed(self):
-        factory = hblink.reportFactory(CFG)
-        proto = factory()
-        t = MockStreamTransport(('10.9.9.9', 1234))   # not in REPORT_CLIENTS
-        proto.connection_made(t)
-        self.assertTrue(t.closed)
-        self.assertNotIn(proto, factory.clients)
-
-    def test_connect_pushes_config_snapshot(self):
-        _, proto = self._client()
-        first = bytes(proto.transport.written).split(b'\n')[0]
-        evt = json.loads(first)
-        self.assertEqual(evt['type'], 'config')
-        self.assertIn('MASTER-1', evt['systems'])
-        self.assertEqual(evt['systems']['OBP-1']['MODE'], 'OPENBRIDGE')
-
-    def test_send_clients_emits_one_json_line(self):
-        factory, proto = self._client()
-        proto.transport.written.clear()
-        factory.send_clients({'type': 'ping', 'n': 1})
-        data = bytes(proto.transport.written)
+    def test_send_json_emits_one_terminated_line(self):
+        srv = self._server()
+        w = MockAsyncWriter()
+        srv.clients.append(w)
+        srv._send_json({'type': 'ping', 'n': 1})
+        data = bytes(w.written)
         self.assertTrue(data.endswith(b'\n'))
         self.assertEqual(json.loads(data), {'type': 'ping', 'n': 1})
+        self.assertEqual(data.count(b'\n'), 1)
+
+    def test_send_json_sheds_closing_writer(self):
+        srv = self._server()
+        alive, dead = MockAsyncWriter(), MockAsyncWriter(closing=True)
+        srv.clients.extend([alive, dead])
+        srv._send_json({'type': 'ping'})
+        self.assertIn(alive, srv.clients)
+        self.assertNotIn(dead, srv.clients)      # is_closing() -> shed
+        self.assertEqual(bytes(dead.written), b'')
+
+    def test_send_json_sheds_unresponsive_writer(self):
+        srv = self._server()
+        stuck = MockAsyncWriter(buffer_size=(2 << 20))   # over the 1 MiB limit
+        srv.clients.append(stuck)
+        srv._send_json({'type': 'ping'})
+        self.assertNotIn(stuck, srv.clients)     # not reading -> shed and closed
+        self.assertTrue(stuck.closed)
+
+    def test_disallowed_client_is_closed(self):
+        srv = self._server()
+        w = MockAsyncWriter(peername=('10.9.9.9', 1234))   # not in allowed list
+        asyncio.run(srv._client_connected(MockAsyncReader(), w, allowed=['127.0.0.1']))
+        self.assertTrue(w.closed)
+        self.assertNotIn(w, srv.clients)
 
     def test_json_systems_omits_secrets(self):
         view = hblink.json_systems(CFG['SYSTEMS'])
@@ -139,24 +192,26 @@ class TestReportingNDJSON(unittest.TestCase):
 
 
 class TestBridgeStreamEvents(unittest.TestCase):
-    def _factory(self):
+    # BridgeReportServer.send_bridge_event() turns the CSV strings the routing
+    # code emits into JSON stream events. Capture _send_json to inspect them.
+    def _server(self):
         import bridge
-        f = bridge.bridgeReportFactory(CFG)
+        srv = bridge.BridgeReportServer({})
         captured = []
-        f.send_clients = captured.append
-        return f, captured
+        srv._send_json = captured.append
+        return srv, captured
 
     def test_start_csv_becomes_json(self):
-        f, cap = self._factory()
-        f.send_bridgeEvent(b'GROUP VOICE,START,RX,MASTER-1,123,312000,3120001,1,3100')
+        srv, cap = self._server()
+        srv.send_bridge_event(b'GROUP VOICE,START,RX,MASTER-1,123,312000,3120001,1,3100')
         self.assertEqual(cap[0], {
             'type': 'stream', 'call_type': 'GROUP VOICE', 'action': 'START',
             'trx': 'RX', 'system': 'MASTER-1', 'stream_id': 123, 'peer': 312000,
             'src': 3120001, 'slot': 1, 'dst': 3100})
 
     def test_end_csv_includes_duration(self):
-        f, cap = self._factory()
-        f.send_bridgeEvent('GROUP VOICE,END,TX,MASTER-1,123,312000,3120001,2,3100,4.20')
+        srv, cap = self._server()
+        srv.send_bridge_event('GROUP VOICE,END,TX,MASTER-1,123,312000,3120001,2,3100,4.20')
         self.assertEqual(cap[0]['action'], 'END')
         self.assertEqual(cap[0]['slot'], 2)
         self.assertEqual(cap[0]['duration'], 4.20)
