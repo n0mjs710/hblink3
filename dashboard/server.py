@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import ssl
 import sys
 import time
@@ -259,16 +260,45 @@ async def handle_event(evt):
         logger.debug('ignoring unknown event type: %s', t)
 
 
+# hblink3 pushes a config snapshot at least every REPORT_INTERVAL (default 10s),
+# so if we go this long with no line at all the link is dead -- whether or not a
+# clean FIN ever arrived. Without this timeout, a silently-severed connection
+# (NIC flap, DHCP renew, firewall/conntrack drop) leaves readline() blocked
+# forever and the reconnect loop below never runs, requiring a manual restart.
+FEED_READ_TIMEOUT = 60
+
+
+def _enable_tcp_keepalive(writer):
+    sock = writer.get_extra_info('socket')
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        if hasattr(socket, 'TCP_KEEPIDLE'):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 15)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 4)
+    except OSError as e:
+        logger.warning('could not set TCP keepalive on HBlink3 feed: %s', e)
+
+
 # ---- HBlink3 feed client (with reconnect) ------------------------------------
 async def hblink_feed():
     while True:
+        writer = None
         try:
             reader, writer = await asyncio.open_connection(HBLINK_IP, HBLINK_PORT)
+            _enable_tcp_keepalive(writer)
             logger.info('connected to HBlink3 feed at %s:%s', HBLINK_IP, HBLINK_PORT)
             STATE.hblink = True
             await broadcast({'type': 'hblink', 'connected': True})
             while True:
-                line = await reader.readline()
+                try:
+                    line = await asyncio.wait_for(reader.readline(), FEED_READ_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.warning('no data from HBlink3 for %ss; assuming link dead, reconnecting',
+                                   FEED_READ_TIMEOUT)
+                    break
                 if not line:
                     break                                  # connection closed
                 try:
@@ -278,6 +308,11 @@ async def hblink_feed():
         except (ConnectionRefusedError, OSError) as e:
             logger.warning('HBlink3 feed unavailable (%s); retrying', e)
         finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
             if STATE.hblink:
                 STATE.hblink = False
                 STATE.systems = {}
