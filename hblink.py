@@ -879,6 +879,9 @@ class ReportServer:
             'systems': json_systems(self._config['SYSTEMS']),
             'ping_time': self._config['GLOBAL'].get('PING_TIME', 5),
             'max_missed': self._config['GLOBAL'].get('MAX_MISSED', 3),
+            # De-facto heartbeat interval; the dashboard sizes its "link dead"
+            # read timeout relative to how often we actually push.
+            'report_interval': self._config['REPORTS']['REPORT_INTERVAL'],
         })
 
     def send_bridge(self):

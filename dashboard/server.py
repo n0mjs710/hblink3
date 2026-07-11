@@ -233,8 +233,12 @@ async def broadcast(obj):
 
 
 async def handle_event(evt):
+    global FEED_READ_TIMEOUT
     t = evt.get('type')
     if t == 'config':
+        interval = evt.get('report_interval')
+        if interval:
+            FEED_READ_TIMEOUT = max(float(interval) * 3, 30.0)
         STATE.ping_time = evt.get('ping_time', STATE.ping_time)
         STATE.max_missed = evt.get('max_missed', STATE.max_missed)
         STATE.systems = enrich_config(evt['systems'])
@@ -260,12 +264,16 @@ async def handle_event(evt):
         logger.debug('ignoring unknown event type: %s', t)
 
 
-# hblink3 pushes a config snapshot at least every REPORT_INTERVAL (default 10s),
-# so if we go this long with no line at all the link is dead -- whether or not a
-# clean FIN ever arrived. Without this timeout, a silently-severed connection
-# (NIC flap, DHCP renew, firewall/conntrack drop) leaves readline() blocked
-# forever and the reconnect loop below never runs, requiring a manual restart.
-FEED_READ_TIMEOUT = 60
+# hblink3 pushes a config snapshot every REPORT_INTERVAL seconds -- that push is
+# the de-facto heartbeat. If we go long enough with no line at all, the link is
+# dead (whether or not a clean FIN arrived); without this, a silently-severed
+# connection leaves readline() blocked forever and the reconnect loop never runs.
+# The timeout must be safely LARGER than the push interval or it false-trips on a
+# healthy idle link -- so we size it to 3x the interval the daemon advertises (see
+# handle_event), not a fixed value. TCP keepalive (above) stays the primary
+# detector of a truly dead socket. The default applies only until the first
+# config arrives (which the daemon sends immediately on connect).
+FEED_READ_TIMEOUT = 180.0
 
 
 def _enable_tcp_keepalive(writer):
