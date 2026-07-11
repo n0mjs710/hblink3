@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 #
-# Live UDP traffic harness: logs into a running HBlink3 MASTER as a HomeBrew
+# Live UDP traffic harness: logs into a running HBlink3 SERVER as a HomeBrew
 # peer and injects DMRD voice streams over a real socket. Unlike tests/harness.py
 # (which drives dmrd_received in-process), this exercises the full server path --
-# socket -> master handshake -> ACL -> bridge routing -> contention -> reporting --
+# socket -> server handshake -> ACL -> bridge routing -> contention -> reporting --
 # so it can drive the dashboard with realistic traffic.
 #
 # It is deliberately CONTROLLABLE so we can tell expected contention from a bug:
@@ -17,7 +17,7 @@
 #                      collide until the stream times out. This is the stuck-
 #                      stream condition the supersession / 2s-timeout fix targets.
 #
-# Usage (against the sample hblink.cfg MASTER-1):
+# Usage (against the sample hblink.cfg SERVER-1):
 #   venv/bin/python tests/live_harness.py --calls 5
 #   venv/bin/python tests/live_harness.py --concurrent 3 --calls 3
 #   venv/bin/python tests/live_harness.py --no-term --calls 3 --gap 1
@@ -64,12 +64,12 @@ def b4(n): return n.to_bytes(4, 'big')
 
 
 def login(sock, addr, peer_id, passphrase):
-    """Run the HBP peer->master handshake. Returns when CONNECTED or raises."""
+    """Run the HBP login handshake. Returns when CONNECTED or raises."""
     def expect(prefix):
         sock.settimeout(5.0)
         data, _ = sock.recvfrom(1024)
         if data[:len(MSTNAK)] == MSTNAK:
-            raise RuntimeError('master sent MSTNAK (login refused) -- check ACL / peer id')
+            raise RuntimeError('server sent MSTNAK (login refused) -- check ACL / peer id')
         if data[:len(prefix)] != prefix:
             raise RuntimeError('expected %r, got %r' % (prefix, data[:10]))
         return data
@@ -148,7 +148,7 @@ def send_stream(sock, addr, peer_id, src, dst, slot, call_type, stream_id,
 
 def main():
     ap = argparse.ArgumentParser(description='Live DMRD traffic harness for HBlink3')
-    ap.add_argument('--master-ip', default='127.0.0.1')
+    ap.add_argument('--server-ip', default='127.0.0.1')
     ap.add_argument('--port', type=int, default=54000)
     ap.add_argument('--passphrase', default='s3cr37w0rd')
     ap.add_argument('--peer-id', type=int, default=312100)
@@ -168,7 +168,7 @@ def main():
                     help='with --no-term, force the last burst vseq (e.g. 2 to reproduce the END-loss bug); random if unset')
     args = ap.parse_args()
 
-    addr = (args.master_ip, args.port)
+    addr = (args.server_ip, args.port)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     login(sock, addr, args.peer_id, args.passphrase.encode())
 

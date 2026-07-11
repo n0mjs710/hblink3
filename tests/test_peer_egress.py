@@ -28,23 +28,23 @@ _KW = dict(rf_src=bytes_3(312000), dst=bytes_3(3100), peer=bytes_4(312000), slot
 class TestPeerEgress(unittest.TestCase):
 
     def _world(self):
-        # MASTER-1 (source) bridged to REPEATER-1, which is MODE PEER in harness.cfg.
-        return harness.World({'B': [_member('MASTER-1', 1, 3100),
+        # SERVER-1 (source) bridged to REPEATER-1, which is MODE PEER in harness.cfg.
+        return harness.World({'B': [_member('SERVER-1', 1, 3100),
                                     _member('REPEATER-1', 1, 3100)]})
 
     def test_connected_peer_receives_forward(self):
         w = self._world()                         # harness marks the peer connected
         self.assertEqual(bridge.systems['REPEATER-1']._stats['CONNECTION'], 'YES')
-        w.feed_group_header('MASTER-1', stream_id=b'\x00\x00\x00\x40', **_KW)
-        w.feed_group_burst('MASTER-1', 0, stream_id=b'\x00\x00\x00\x40', **_KW)
+        w.feed_group_header('SERVER-1', stream_id=b'\x00\x00\x00\x40', **_KW)
+        w.feed_group_burst('SERVER-1', 0, stream_id=b'\x00\x00\x00\x40', **_KW)
         self.assertTrue(w.emitted_to('REPEATER-1'))
 
     def test_disconnected_peer_target_skipped(self):
         w = self._world()
         bridge.systems['REPEATER-1']._stats['CONNECTION'] = 'NO'   # not logged in
-        w.feed_group_header('MASTER-1', stream_id=b'\x00\x00\x00\x41', **_KW)
+        w.feed_group_header('SERVER-1', stream_id=b'\x00\x00\x00\x41', **_KW)
         for burst in (0, 1, 2):
-            w.feed_group_burst('MASTER-1', burst, stream_id=b'\x00\x00\x00\x41', **_KW)
+            w.feed_group_burst('SERVER-1', burst, stream_id=b'\x00\x00\x00\x41', **_KW)
         self.assertEqual(w.emitted_to('REPEATER-1'), [])           # nothing forwarded
 
 

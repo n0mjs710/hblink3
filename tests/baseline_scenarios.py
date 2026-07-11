@@ -47,37 +47,37 @@ def _hex(captures):
 # ---- scenarios ----
 
 def hbp_to_hbp_same_slot():
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
-    _full_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
+    _full_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
                peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x11')
     return _hex(w.captures)
 
 
 def hbp_to_hbp_cross_slot():
     # Source on TS1, target subscribed on TS2 -> exercises the TS-bit flip.
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 2, 3100)]})
-    _full_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('REPEATER-1', 2, 3100)]})
+    _full_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
                peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x12')
     return _hex(w.captures)
 
 
 def hbp_to_hbp_tgid_rewrite():
     # Target subscribed on a different TGID -> destination TGID is rewritten.
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 1, 31665)]})
-    _full_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('REPEATER-1', 1, 31665)]})
+    _full_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
                peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x13')
     return _hex(w.captures)
 
 
 def hbp_to_obp():
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('OBP-1', 1, 3100)]})
-    _full_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('OBP-1', 1, 3100)]})
+    _full_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
                peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x14')
     return _hex(w.captures)
 
 
 def obp_to_hbp():
-    w = harness.World({'B': [_member('OBP-1', 1, 3100), _member('MASTER-1', 1, 3100)]})
+    w = harness.World({'B': [_member('OBP-1', 1, 3100), _member('SERVER-1', 1, 3100)]})
     _full_call(w, 'OBP-1', rf_src=bytes_3(1234), dst=bytes_3(3100),
                peer=bytes_4(3129100), slot=1, stream_id=b'\x00\x00\x00\x15')
     return _hex(w.captures)
@@ -91,10 +91,10 @@ def obp_to_obp():
 
 
 def hbp_multi_target():
-    # One source bridged to an HBP peer, a second HBP master, and an OBP.
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 1, 3100),
-                             _member('MASTER-2', 1, 3100), _member('OBP-1', 1, 3100)]})
-    _full_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
+    # One source bridged to an HBP outbound system, a second HBP server, and an OBP.
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('REPEATER-1', 1, 3100),
+                             _member('SERVER-2', 1, 3100), _member('OBP-1', 1, 3100)]})
+    _full_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(3100),
                peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x17')
     return _hex(w.captures)
 
@@ -102,12 +102,12 @@ def hbp_multi_target():
 def hbp_to_hbp_no_voice_header():
     # First frame is a burst (no voice header) -> the LC is synthesized from the
     # header fields rather than decoded, exercising the other src_lc path.
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
     kw = dict(rf_src=bytes_3(312000), dst=bytes_3(3100), peer=bytes_4(312000),
               slot=1, stream_id=b'\x00\x00\x00\x1a')
-    w.feed_group_burst('MASTER-1', 1, **kw)
-    w.feed_group_burst('MASTER-1', 2, **kw)
-    w.feed_group_terminator('MASTER-1', **kw)
+    w.feed_group_burst('SERVER-1', 1, **kw)
+    w.feed_group_burst('SERVER-1', 2, **kw)
+    w.feed_group_terminator('SERVER-1', **kw)
     return _hex(w.captures)
 
 
@@ -123,46 +123,46 @@ def obp_to_obp_no_voice_header():
 def hbp_contention_second_stream_blocked():
     # Two streams on the same TGID/slot; the second must not produce a duplicate
     # forwarded call while the first is active.
-    w = harness.World({'B': [_member('MASTER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
+    w = harness.World({'B': [_member('SERVER-1', 1, 3100), _member('REPEATER-1', 1, 3100)]})
     a = dict(rf_src=bytes_3(312000), dst=bytes_3(3100), peer=bytes_4(312000),
              slot=1, stream_id=b'\x00\x00\x00\x18')
     b = dict(rf_src=bytes_3(312999), dst=bytes_3(3100), peer=bytes_4(312000),
              slot=1, stream_id=b'\x00\x00\x00\x19')
-    w.feed_group_header('MASTER-1', **a)
-    w.feed_group_burst('MASTER-1', 1, **a)
-    w.feed_group_header('MASTER-1', **b)   # contends with the active call
-    w.feed_group_burst('MASTER-1', 1, **b)
+    w.feed_group_header('SERVER-1', **a)
+    w.feed_group_burst('SERVER-1', 1, **a)
+    w.feed_group_header('SERVER-1', **b)   # contends with the active call
+    w.feed_group_burst('SERVER-1', 1, **b)
     return _hex(w.captures)
 
 
 def unit_hbp_to_hbp():
-    w = harness.World({}, unit_systems=['MASTER-1'], extra_systems=['REPEATER-1'])
+    w = harness.World({}, unit_systems=['SERVER-1'], extra_systems=['REPEATER-1'])
     w.seed_unit_map(bytes_3(2080), 'REPEATER-1')
-    _full_unit_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
+    _full_unit_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
                     peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x21')
     return _hex(w.captures)
 
 
 def unit_hbp_to_obp():
-    w = harness.World({}, unit_systems=['MASTER-1'], extra_systems=['OBP-1'])
+    w = harness.World({}, unit_systems=['SERVER-1'], extra_systems=['OBP-1'])
     w.seed_unit_map(bytes_3(2080), 'OBP-1')
-    _full_unit_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
+    _full_unit_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
                     peer=bytes_4(312000), slot=1, stream_id=b'\x00\x00\x00\x22')
     return _hex(w.captures)
 
 
 def unit_hbp_to_obp_ts2():
     # Unit on TS2 to an OBP (BOTH_SLOTS False) -> slot bit cleared on egress.
-    w = harness.World({}, unit_systems=['MASTER-1'], extra_systems=['OBP-1'])
+    w = harness.World({}, unit_systems=['SERVER-1'], extra_systems=['OBP-1'])
     w.seed_unit_map(bytes_3(2080), 'OBP-1')
-    _full_unit_call(w, 'MASTER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
+    _full_unit_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),
                     peer=bytes_4(312000), slot=2, stream_id=b'\x00\x00\x00\x23')
     return _hex(w.captures)
 
 
 def unit_obp_to_hbp():
-    w = harness.World({}, unit_systems=[], extra_systems=['OBP-1', 'MASTER-1'])
-    w.seed_unit_map(bytes_3(2080), 'MASTER-1')
+    w = harness.World({}, unit_systems=[], extra_systems=['OBP-1', 'SERVER-1'])
+    w.seed_unit_map(bytes_3(2080), 'SERVER-1')
     _full_unit_call(w, 'OBP-1', rf_src=bytes_3(1234), dst=bytes_3(2080),
                     peer=bytes_4(3129100), slot=1, stream_id=b'\x00\x00\x00\x24')
     return _hex(w.captures)

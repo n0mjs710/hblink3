@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
 # Regression tests for HBSYSTEM.dmrd_acl_check(), the ACL helper extracted from
-# the master and peer receive paths in hblink.py during the 2026 cleanup.
+# the server and outbound receive paths in hblink.py during the 2026 cleanup.
 # Pins both the PERMIT/DENY + per-slot matching contract and the "log each
 # dropped stream only once per slot" dedup behavior.
 #

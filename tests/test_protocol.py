@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
 # Regression tests for the asyncio migration's protocol mechanics -- the parts
-# the routing harness does not exercise: the master login handshake state
+# the routing harness does not exercise: the server login handshake state
 # machine, the reporting server's netstring framing, and that the UDP send paths
 # use transport.sendto(). Driven against mock transports (no real sockets).
 #
@@ -58,46 +58,46 @@ class MockStreamTransport:
         self.closed = True
 
 
-class TestMasterHandshake(unittest.TestCase):
-    """Drive a MASTER through RPTL -> RPTK -> RPTC over datagram_received and
+class TestServerHandshake(unittest.TestCase):
+    """Drive a SERVER through RPTL -> RPTK -> RPTC over datagram_received and
     assert the state machine and responses, exercising the asyncio rename
     (datagram_received) and transport.sendto path."""
 
     def setUp(self):
-        self.master = hblink.HBSYSTEM('MASTER-1', CFG, None)
-        self.master.transport = MockDatagramTransport()   # bypass connection_made's task
+        self.server = hblink.HBSYSTEM('SERVER-1', CFG, None)
+        self.server.transport = MockDatagramTransport()   # bypass connection_made's task
         self.peer_id = bytes_4(312000)
         self.addr = ('127.0.0.1', 50000)
-        self.passphrase = CFG['SYSTEMS']['MASTER-1']['PASSPHRASE']
+        self.passphrase = CFG['SYSTEMS']['SERVER-1']['PASSPHRASE']
 
     def test_full_login_exchange(self):
-        m = self.master
+        m = self.server
         # 1) Login request -> challenge
         m.datagram_received(RPTL + self.peer_id, self.addr)
-        self.assertIn(self.peer_id, m._peers)
-        self.assertEqual(m._peers[self.peer_id]['CONNECTION'], 'CHALLENGE_SENT')
+        self.assertIn(self.peer_id, m._repeaters)
+        self.assertEqual(m._repeaters[self.peer_id]['CONNECTION'], 'CHALLENGE_SENT')
         self.assertEqual(m.transport.sent[-1][0][:len(RPTACK)], RPTACK)
 
         # 2) Answer the challenge with the correct hash -> WAITING_CONFIG
-        salt = bytes_4(m._peers[self.peer_id]['SALT'])
+        salt = bytes_4(m._repeaters[self.peer_id]['SALT'])
         calc = bhex(sha256(salt + self.passphrase).hexdigest())
         m.datagram_received(RPTK + self.peer_id + calc, self.addr)
-        self.assertEqual(m._peers[self.peer_id]['CONNECTION'], 'WAITING_CONFIG')
+        self.assertEqual(m._repeaters[self.peer_id]['CONNECTION'], 'WAITING_CONFIG')
         self.assertEqual(m.transport.sent[-1][0], RPTACK + self.peer_id)
 
         # 3) Send configuration -> connected
         rptc = RPTC + self.peer_id + b'TEST    ' + b'\x00' * 300
         m.datagram_received(rptc, self.addr)
-        self.assertEqual(m._peers[self.peer_id]['CONNECTION'], 'YES')
+        self.assertEqual(m._repeaters[self.peer_id]['CONNECTION'], 'YES')
         self.assertEqual(m.transport.sent[-1][0], RPTACK + self.peer_id)
 
     def test_wrong_passphrase_is_rejected(self):
-        m = self.master
+        m = self.server
         m.datagram_received(RPTL + self.peer_id, self.addr)
         bad = bhex(sha256(b'\x00\x00\x00\x00' + b'wrong').hexdigest())
         m.datagram_received(RPTK + self.peer_id + bad, self.addr)
         # Peer removed and a NAK sent
-        self.assertNotIn(self.peer_id, m._peers)
+        self.assertNotIn(self.peer_id, m._repeaters)
         self.assertEqual(m.transport.sent[-1][0][:6], MSTNAK)
 
 
@@ -203,15 +203,15 @@ class TestBridgeStreamEvents(unittest.TestCase):
 
     def test_start_csv_becomes_json(self):
         srv, cap = self._server()
-        srv.send_bridge_event(b'GROUP VOICE,START,RX,MASTER-1,123,312000,3120001,1,3100')
+        srv.send_bridge_event(b'GROUP VOICE,START,RX,SERVER-1,123,312000,3120001,1,3100')
         self.assertEqual(cap[0], {
             'type': 'stream', 'call_type': 'GROUP VOICE', 'action': 'START',
-            'trx': 'RX', 'system': 'MASTER-1', 'stream_id': 123, 'peer': 312000,
+            'trx': 'RX', 'system': 'SERVER-1', 'stream_id': 123, 'peer': 312000,
             'src': 3120001, 'slot': 1, 'dst': 3100})
 
     def test_end_csv_includes_duration(self):
         srv, cap = self._server()
-        srv.send_bridge_event('GROUP VOICE,END,TX,MASTER-1,123,312000,3120001,2,3100,4.20')
+        srv.send_bridge_event('GROUP VOICE,END,TX,SERVER-1,123,312000,3120001,2,3100,4.20')
         self.assertEqual(cap[0]['action'], 'END')
         self.assertEqual(cap[0]['slot'], 2)
         self.assertEqual(cap[0]['duration'], 4.20)
@@ -230,26 +230,26 @@ class TestTransportSend(unittest.TestCase):
         # NETWORK_ID was written into the peer-id slot [11:15]
         self.assertEqual(data[11:15], CFG['SYSTEMS']['OBP-1']['NETWORK_ID'])
 
-    def test_peer_send_master_uses_sendto(self):
+    def test_outbound_send_server_uses_sendto(self):
         peer = hblink.HBSYSTEM('REPEATER-1', CFG, None)
         peer.transport = MockDatagramTransport()
         pkt = DMRD + b'\x00' + b'\x11\x22\x33' + b'\x00\x00\x09' + b'\xaa\xbb\xcc\xdd' + b'\x00' + b'\x00\x00\x00\x01' + b'\x00' * 33
-        # A logged-in peer sends call traffic to its master via sendto.
+        # A logged-in outbound system sends call traffic to its server via sendto.
         peer._stats['CONNECTION'] = 'YES'
-        peer.send_master(pkt)
+        peer.send_server(pkt)
         self.assertEqual(len(peer.transport.sent), 1)
         _, addr = peer.transport.sent[0]
-        self.assertEqual(addr, CFG['SYSTEMS']['REPEATER-1']['MASTER_SOCKADDR'])
+        self.assertEqual(addr, CFG['SYSTEMS']['REPEATER-1']['SERVER_SOCKADDR'])
 
-    def test_peer_send_master_drops_dmrd_when_not_connected(self):
+    def test_outbound_send_server_drops_dmrd_when_not_connected(self):
         peer = hblink.HBSYSTEM('REPEATER-1', CFG, None)
         peer.transport = MockDatagramTransport()
         peer._stats['CONNECTION'] = 'NO'
         pkt = DMRD + b'\x00' + b'\x11\x22\x33' + b'\x00\x00\x09' + b'\xaa\xbb\xcc\xdd' + b'\x00' + b'\x00\x00\x00\x01' + b'\x00' * 33
-        peer.send_master(pkt)
+        peer.send_server(pkt)
         self.assertEqual(peer.transport.sent, [])          # call traffic dropped
         # but login/keepalive packets still go out
-        peer.send_master(RPTL + b'\x00\x00\x00\x01')
+        peer.send_server(RPTL + b'\x00\x00\x00\x01')
         self.assertEqual(len(peer.transport.sent), 1)
 
 
@@ -264,10 +264,10 @@ class TestSupersessionEnd(unittest.TestCase):
         captured = []
 
         class Rep:
-            def send_bridgeEvent(self, data):
+            def send_bridge_event(self, data):
                 captured.append(data.decode() if isinstance(data, (bytes, bytearray)) else data)
 
-        return bridge.routerHBP('MASTER-1', cfg, Rep()), captured
+        return bridge.routerHBP('SERVER-1', cfg, Rep()), captured
 
     def _activate(self, st, ct='GROUP VOICE'):
         st['RX_TYPE'] = HBPF_SLT_VHEAD          # an active (non-terminated) stream
@@ -284,7 +284,7 @@ class TestSupersessionEnd(unittest.TestCase):
         r, cap = self._router()
         self._activate(r.STATUS[1])
         r._end_slot_stream(1)
-        self.assertEqual(cap, ['GROUP VOICE,END,RX,MASTER-1,12345,312100,3120001,1,3100,4.20'])
+        self.assertEqual(cap, ['GROUP VOICE,END,RX,SERVER-1,12345,312100,3120001,1,3100,4.20'])
         self.assertTrue(r.STATUS[1]['RX_TERMINATED'])
         # idempotent: a second call (already terminated) emits nothing more
         r._end_slot_stream(1)
@@ -294,7 +294,7 @@ class TestSupersessionEnd(unittest.TestCase):
         r, cap = self._router()
         self._activate(r.STATUS[2], ct='UNIT VOICE')
         r._end_slot_stream(2)
-        self.assertTrue(cap[0].startswith('UNIT VOICE,END,RX,MASTER-1,12345,'))
+        self.assertTrue(cap[0].startswith('UNIT VOICE,END,RX,SERVER-1,12345,'))
 
     def test_no_event_for_idle_slot(self):
         r, cap = self._router()
