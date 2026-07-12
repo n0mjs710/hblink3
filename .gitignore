@@ -102,3 +102,7 @@ talkgroup_ids.*
 # Dashboard local config (copy from dashboard/config_sample.py)
 dashboard/config.py
 dashboard/__pycache__/
+
+# Site-specific dashboard branding (operator's own logo; not shipped)
+dashboard/*.png
+dashboard/*.jpg
