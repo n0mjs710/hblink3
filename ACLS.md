@@ -79,7 +79,7 @@ HBlink3 applies four kinds of ACL. Each is a separate config key.
 
 | Key | Gates | Value domain | Notes |
 |-----|-------|--------------|-------|
-| `REG_ACL` | **Repeater/peer registration** (login) | peer IDs, `1 … 4294967295` | Only meaningful on **server (master)** systems. Peers/OpenBridge don't register. **Always enforced** — see §5. |
+| `REG_ACL` | **Repeater/peer registration** (login) | peer IDs, `1 … 4294967295` | Only meaningful on **SERVER** systems. Outbound/OpenBridge links don't accept registrations. **Always enforced** — see §5. |
 | `SUB_ACL` | **Subscriber** (the source radio ID of a call) | subscriber IDs, `1 … 16776415` | Applied to every voice/data stream. |
 | `TGID_TS1_ACL` | **Destination talkgroup on Timeslot 1** | talkgroup IDs, `1 … 16776415` | |
 | `TGID_TS2_ACL` | **Destination talkgroup on Timeslot 2** | talkgroup IDs, `1 … 16776415` | |
@@ -200,11 +200,11 @@ TGID_TS1_ACL: PERMIT:2,9,3120
 TGID_TS2_ACL: PERMIT:3120,31205
 ```
 
-**Registration control on a master.** Accept only two specific repeater IDs onto
-this master; reject all other login attempts:
+**Registration control on a server.** Accept only two specific repeater IDs onto
+this server; reject all other login attempts:
 
 ```ini
-[MASTER-1]
+[SERVER-1]
 MODE: SERVER
 REG_ACL: PERMIT:311111,311222
 ```

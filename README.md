@@ -4,17 +4,23 @@ HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol
 
 > **Which HBlink?** HBlink3 is "system-oriented" and built for **transit routing and conference bridging** between networks. Its companion, **HBlink4** (by the same author), is a repeater-oriented **endpoint server** for running a single end-point network with no granudlar transit routing. Pick the one that matches your role.
 
+> ⚠️ **Upgrading? Two breaking config changes to know about.**
+> 1. **OpenBridge routing moved** — `MODE: OPENBRIDGE` systems are no longer inline `BRIDGES` members in `rules.py`; they now live in a dedicated **`OBP_BRIDGES`** table. Old configs stop with a clear startup error. Run **`python tools/migrate_obp_rules.py`** to convert your `rules.py` automatically, or see [CONFIGURING.md](CONFIGURING.md#obp_bridges).
+> 2. **System modes renamed** — `MASTER`→**`SERVER`** and `PEER`/`CLIENT`→**`OUTBOUND`** (`OPENBRIDGE` unchanged). Update the `MODE:` line of each stanza in `hblink.cfg`.
+>
+> Your `hblink.cfg`/`rules.py` are git-ignored, so a `git pull` won't touch them — but the new code won't accept the old values. Non-OpenBridge configs need only change (2).
+
 ## Applications
 
 | Program | Purpose |
 |---|---|
 | `bridge.py` | The main application: a configurable conference-bridge call router with dynamic on/off triggering, timeouts, and private (unit) call routing. |
 | `bridge_all.py` | A simple proxy that forwards all traffic between every configured system — makes several repeaters appear as one. |
-| `hblink.py` | The protocol core. Runs standalone as a master/peer for testing, and is the module the applications are built on. |
+| `hblink.py` | The protocol core. Runs standalone as a server/outbound system for testing, and is the module the applications are built on. |
 
 ## Features
 
-- HBP **server** (master) and **client** (peer) modes for MMDVM repeaters and hotspots
+- HBP **server** and **outbound** (client) modes for MMDVM repeaters and hotspots
 - **OpenBridge** connectivity to other transit call routers, including Brandmeister / DMR+ (IPSC2)
 - Rules-based **conference-bridge routing** with dynamic ON/OFF/RESET talkgroup triggers and timeouts, including the ability to use TGIDs as in-band signalling to trigger dynamic connections -- sometimes referred to as "dial-a-talkgroup".
 - **Private (unit) call** routing using a learned subscriber-to-system map that only floods systems configured for unit calls, and only until the target unit's system is located. It then prunes re-transmission to the system with the target unit.
@@ -38,7 +44,7 @@ See **[INSTALL.md](INSTALL.md)** for full setup, configuration, and running as a
 
 ## Configuration
 
-- **`hblink.cfg`** — global settings, reporting, logging, alias downloads, and one stanza per system (`MASTER`, `PEER`, or `OPENBRIDGE`). Start from `hblink-SAMPLE.cfg`.
+- **`hblink.cfg`** — global settings, reporting, logging, alias downloads, and one stanza per system (`SERVER`, `OUTBOUND`, or `OPENBRIDGE`). Start from `hblink-SAMPLE.cfg`.
 - **`rules.py`** — (`bridge.py` only) defines the conference bridges, the systems/talkgroups/timeslots that belong to each, and the systems permitted to pass unit calls. Start from `rules_SAMPLE.py`.
 
 Your `hblink.cfg` and `rules.py` are git-ignored, so `git pull` won't overwrite them.
@@ -79,7 +85,7 @@ used. Talkgroup IDs not present in the file are displayed as their raw numeric v
 ## Dashboard
 
 A real-time web dashboard lives in [`dashboard/`](dashboard/) — a separate program
-with a modern dark UI showing master/peer/OpenBridge systems, conference-bridge
+with a modern dark UI showing server/outbound/OpenBridge systems, conference-bridge
 state, and a live call log. Enable HBlink3's reporting feed (`[REPORTS]` in
 `hblink.cfg`) and see [dashboard/README.md](dashboard/README.md) to run it. the dashboard
 is kept separate to keep performance of the forwarding hot path free from unecessary

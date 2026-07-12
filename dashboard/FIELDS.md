@@ -39,16 +39,16 @@ and its state is remembered in your browser.
 
 ---
 
-## Master Systems
+## Server Systems
 
-One block per HBlink3 **MASTER** instance (repeaters/hotspots connect *to* it).
+One block per HBlink3 **SERVER** instance (repeaters/hotspots connect *to* it).
 
 **Block heading**
 
 | Element | Meaning |
 |---|---|
-| System name | The master's name from `hblink.cfg` (e.g. `MASTER-1`). |
-| `repeat` / `isolate` pill | `repeat` if the master forwards traffic between its own peers (`REPEAT: True`), `isolate` if it does not. |
+| System name | The server's name from `hblink.cfg` (e.g. `SERVER-1`). |
+| `repeat` / `isolate` pill | `repeat` if the server forwards traffic between its own repeaters (`REPEAT: True`), `isolate` if it does not. |
 | *N* peer(s) | How many repeaters/hotspots are currently logged in. |
 | Show/Hide Connections | Collapses this system's connection table. When collapsed, system-level TS1/TS2 activity pills replace it so live calls stay visible. Default from `SERVER_REPEATERS`; per-system state is remembered in your browser. |
 
@@ -64,10 +64,10 @@ One block per HBlink3 **MASTER** instance (repeaters/hotspots connect *to* it).
 
 ---
 
-## Peer Systems
+## Outbound Systems
 
-One row per HBlink3 **PEER** instance (HBlink3 connecting *out* to an upstream
-master, e.g. another HBlink or a BrandMeister/IPSC2 server).
+One row per HBlink3 **OUTBOUND** instance (HBlink3 connecting *out* to an upstream
+server, e.g. another HBlink or a BrandMeister/IPSC2 server).
 
 | Column | Meaning |
 |---|---|

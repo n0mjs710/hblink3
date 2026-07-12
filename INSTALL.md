@@ -38,11 +38,11 @@ Edit `hblink.cfg`:
 - **[LOGGER]** — log file, handlers, and level.
 - **[ALIASES]** — optional download of repeater/subscriber ID files from radioid.net.
 - **System stanzas** — one per connection. Set `MODE` to:
-  - `MASTER` — accept incoming repeaters/hotspots
-  - `PEER` — connect outward to another master
+  - `SERVER` — accept incoming repeaters/hotspots (formerly `MASTER`)
+  - `OUTBOUND` — connect outward to another server (formerly `PEER`/`CLIENT`)
   - `OPENBRIDGE` — link to Brandmeister / DMR+ (IPSC2)
 
-  Duplicate a stanza for each system; the stanza name (e.g. `[MASTER-1]`) must be unique.
+  Duplicate a stanza for each system; the stanza name (e.g. `[SERVER-1]`) must be unique.
 
 If you are running `bridge.py`, also create the rules file:
 
@@ -53,9 +53,10 @@ cp rules_SAMPLE.py rules.py
 `rules.py` defines:
 
 - **`BRIDGES`** — each conference bridge and the system / timeslot / talkgroup that belongs to it, with optional ON/OFF/RESET trigger talkgroups and timeouts.
+- **`OBP_BRIDGES`** — OpenBridge (`OPENBRIDGE`) systems only: a per-OBP `{bridge: TGID}` table (not inline `BRIDGES` members). See [CONFIGURING.md](CONFIGURING.md#obp_bridges).
 - **`UNIT`** — the systems permitted to exchange private (unit) calls.
 
-Every system named in `rules.py` must exist and be enabled in `hblink.cfg`.
+Every system named in `rules.py` must exist and be enabled in `hblink.cfg`. **Upgrading from an older HBlink3?** OpenBridge members used to live inline in `BRIDGES`; convert your file with `python tools/migrate_obp_rules.py` (see [CONFIGURING.md](CONFIGURING.md#obp_bridges)).
 
 ## 3. Run
 
@@ -65,7 +66,7 @@ python bridge.py -c hblink.cfg -r rules.py     # conference-bridge router (main 
 # or
 python bridge_all.py -c hblink.cfg             # forward-everything proxy
 # or
-python hblink.py -c hblink.cfg                 # protocol core, standalone master/peer
+python hblink.py -c hblink.cfg                 # protocol core, standalone server/outbound
 ```
 
 `-c` / `-r` default to `hblink.cfg` and `rules.py` in the program directory. `-l LEVEL` overrides the configured log level.

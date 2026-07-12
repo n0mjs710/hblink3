@@ -14,13 +14,13 @@ full-table refreshes, and no pickle on the wire.
 - **Last Heard** — the most-recent unique callers (user, call type, source
   repeater, timeslot, talkgroup, and when), derived live from the call log. The
   table is collapsible; its open/closed state is remembered in your browser.
-- **Master Systems** — each master and its connected repeaters (ID, callsign,
+- **Server Systems** — each server and its connected repeaters (ID, callsign,
   location, IP, uptime, frequency, colorcode, slots) with the live call on each
   timeslot (source → destination, color-coded by direction). Each server's
   connection list can be collapsed with the **Show/Hide Connections** button;
   when collapsed, system-level TS1/TS2 activity pills replace the table so you
   still see what's talking. State is remembered per-browser.
-- **Peer Systems** — outbound peer connections with health (connection state,
+- **Outbound Systems** — outbound connections with health (connection state,
   pings sent/ackd/lost) and live per-timeslot calls.
 - **OpenBridge Systems** — network ID, target, and active streams.
 - **Conference Bridges** — each bridge's members: timeslot, talkgroup,
@@ -45,7 +45,11 @@ Open `http://<host>:8080`.
 ## Configuration (`config.py`)
 
 - `HBLINK_IP` / `HBLINK_PORT` — HBlink3's reporting feed (the `[REPORTS]` section
-  of `hblink.cfg`: `REPORT_PORT`, default 4321).
+  of `hblink.cfg`: `REPORT_PORT`, default 4321). Used when `HBLINK_TRANSPORT` is `tcp`.
+- `HBLINK_TRANSPORT` / `HBLINK_SOCKET` — optional. Set `HBLINK_TRANSPORT = 'unix'`
+  and `HBLINK_SOCKET` to the daemon's `REPORT_SOCKET` path to connect over a local
+  Unix socket instead of TCP (same-box dashboard; immune to NIC flaps / conntrack
+  eviction). Defaults to `tcp`. Must match the daemon's `REPORT_TRANSPORT`.
 - `WEB_HOST` / `WEB_PORT` — where the dashboard listens.
 - `PATH` / `*_FILE` — alias files mapping DMR IDs to callsigns/talkgroup names
   (the same files HBlink3 uses; point `PATH` at HBlink3's directory to share them).
@@ -64,9 +68,11 @@ In `hblink.cfg`, under `[REPORTS]`:
 - `REPORT: True`
 - `REPORT_PORT` must match the dashboard's `HBLINK_PORT`
 - `REPORT_CLIENTS` must include the dashboard host's IP (or `*`)
-- `REPORT_INTERVAL` sets how often the systems/bridge snapshot is refreshed.
-  **Live calls are pushed instantly**; connection/peer-state changes appear on the
-  next snapshot, so `10` is a good value for dashboard use.
+- `REPORT_INTERVAL` sets how often the full systems/bridge snapshot is resent as a
+  slow resync. **Live calls and repeater connect/disconnect are pushed as they
+  happen** (granular events); the periodic snapshot is just a safety-net resync and
+  also carries the per-repeater ping-quality figures, so a larger value like `60`
+  is fine.
 
 ## Notes
 

@@ -4,7 +4,7 @@ HBlink3's conference bridge (`bridge.py`) is driven by two files:
 
 | File | What it defines |
 |---|---|
-| `hblink.cfg` | The program itself: global timers, reporting, logging, alias lookups, and one stanza per **system** (a Server you host, a Client you dial out as, or an OpenBridge link). |
+| `hblink.cfg` | The program itself: global timers, reporting, logging, alias lookups, and one stanza per **system** (a Server you host, an Outbound system you dial out as, or an OpenBridge link). |
 | `rules.py` | The **routing**: which systems talk to which, on what timeslot/talkgroup, and the talkgroup triggers/timers that turn bridges on and off. |
 
 This document is the full field reference. The sample files (`hblink-SAMPLE.cfg`, `rules_SAMPLE.py`) carry only terse inline notes and point back here.
@@ -22,12 +22,12 @@ INI format (`configparser`). Section names in `[BRACKETS]`; `KEY: value` pairs. 
 | Field | Meaning |
 |---|---|
 | `PATH` | Working directory for runtime files. `./` (the program's own directory) is normal. |
-| `PING_TIME` | Seconds between keepalive pings on Server/Client connections. |
+| `PING_TIME` | Seconds between keepalive pings on Server and Outbound connections. |
 | `MAX_MISSED` | Missed pings before a connection is declared dead and torn down. |
 | `PING_LOSS_WINDOW` | Optional (default `5`, range `1`–`60`). Minutes over which the dashboard measures each repeater's **ping loss** — the share of expected keepalive pings that went missing. Larger = smoother / longer memory. Surfaces a repeater that stays connected but has a lossy link (choppy audio). A repeater that merely pings less often is not counted as lossy. |
 | `PING_LOSS_WARN` | Optional (default `5`). Ping-loss **percent** at or above which the dashboard turns a repeater's callsign gold. `0` disables the flag. |
 | `USE_ACL` | `True`/`False` top-level on/off switch for the **global** ACLs below. System-level ACLs are independent of this. |
-| `REG_ACL` | Registration ACL — which Client **radio IDs** may log in to any Server you host. ACL syntax below. |
+| `REG_ACL` | Registration ACL — which **repeater radio IDs** may log in to any Server you host. ACL syntax below. |
 | `SUB_ACL` | Subscriber ACL — which **subscriber IDs** (the person keying up) may pass traffic, globally. |
 | `TGID_TS1_ACL` / `TGID_TS2_ACL` | Talkgroup ACLs applied to timeslot 1 / timeslot 2 traffic, globally. |
 
@@ -42,7 +42,7 @@ DENY:1-5,3120101        # block the range 1–5 and the single ID 3120101
 PERMIT:3100-3199,9      # allow only this range and ID 9; deny everything else
 ```
 
-A global ACL and a system ACL both apply — traffic must pass **both**. Registration ACLs are only meaningful for `SERVER` systems (a Client or OpenBridge link never registers). See **[ACLS.md](ACLS.md)** for the full ACL model — PERMIT/DENY precedence, how ranges are matched, and worked examples.
+A global ACL and a system ACL both apply — traffic must pass **both**. Registration ACLs are only meaningful for `SERVER` systems (an Outbound or OpenBridge link never accepts registrations). See **[ACLS.md](ACLS.md)** for the full ACL model — PERMIT/DENY precedence, how ranges are matched, and worked examples.
 
 ## `[REPORTS]`
 
@@ -52,8 +52,12 @@ Feeds the real-time dashboard. See [`dashboard/`](dashboard/).
 |---|---|
 | `REPORT` | `True`/`False` — emit the event stream at all. |
 | `REPORT_INTERVAL` | Seconds between periodic status reports. |
-| `REPORT_PORT` | TCP port the report service listens on. |
-| `REPORT_CLIENTS` | Comma-separated client IPs allowed to connect (e.g. `127.0.0.1`). |
+| `REPORT_TRANSPORT` | Optional (default `tcp`). `tcp` = listen on a TCP port (dashboard may be remote); `unix` = listen on a local Unix-domain socket instead. A same-box dashboard on a Unix socket can't be broken by a NIC flap or connection-tracking eviction, so use `unix` when the dashboard runs on the same host. |
+| `REPORT_PORT` | TCP port the report service listens on (when `REPORT_TRANSPORT` = `tcp`). |
+| `REPORT_SOCKET` | Filesystem path for the listening socket (when `REPORT_TRANSPORT` = `unix`), e.g. `/tmp/hblink3-report.sock`. Access is governed by filesystem permissions; `REPORT_CLIENTS` is not used on a Unix socket. |
+| `REPORT_CLIENTS` | Comma-separated client IPs allowed to connect (e.g. `127.0.0.1`) — TCP only. |
+
+> The dashboard has matching `HBLINK_TRANSPORT` (`tcp`/`unix`) and `HBLINK_SOCKET` settings — see [dashboard/README.md](dashboard/README.md). Point the dashboard at the same transport the daemon serves.
 
 ## `[LOGGER]`
 
@@ -238,6 +242,16 @@ Read one row as **"on this OpenBridge, this TGID *is* this bridge."** That singl
 | A bridge carrying **different** TGIDs on two OBPs (**renumber in transit**) | Allowed, logs a **WARNING** — usually a typo, occasionally intentional at a network boundary. |
 
 `OBP_BRIDGES` is optional — omit it (or leave it `{}`) if you run no OpenBridges.
+
+### Migrating from the old inline form
+
+Earlier HBlink3 configured OpenBridge systems as inline `BRIDGES` members. To convert an existing `rules.py`, run the migration tool from the repo root:
+
+```bash
+python tools/migrate_obp_rules.py --config hblink.cfg --rules rules.py --out rules.py.migrated
+```
+
+It reads `hblink.cfg` to learn which systems are `OPENBRIDGE`, lifts each inline OBP member into `OBP_BRIDGES`, prints a summary of what moved, flags any ingress-fork **ERROR** or renumber **WARNING**, and writes a new file (it never overwrites your `rules.py`). Review the output — comments from the original are not carried over — then replace `rules.py` with it.
 
 ## `UNIT`
 
