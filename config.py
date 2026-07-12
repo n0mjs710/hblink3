@@ -133,6 +133,12 @@ def build_config(_config_file):
                     'PATH': config.get(section, 'PATH'),
                     'PING_TIME': config.getint(section, 'PING_TIME'),
                     'MAX_MISSED': config.getint(section, 'MAX_MISSED'),
+                    # Chronic connectivity: report a repeater's ping loss over the
+                    # last PING_LOSS_WINDOW minutes (clamped 1..60), and flag it on
+                    # the dashboard at/above PING_LOSS_WARN percent. Optional; sane
+                    # defaults keep existing configs working.
+                    'PING_LOSS_WINDOW': min(60, max(1, config.getint(section, 'PING_LOSS_WINDOW', fallback=5))),
+                    'PING_LOSS_WARN': max(0, config.getint(section, 'PING_LOSS_WARN', fallback=5)),
                     'USE_ACL': config.get(section, 'USE_ACL'),
                     'REG_ACL': config.get(section, 'REG_ACL'),
                     'SUB_ACL': config.get(section, 'SUB_ACL'),

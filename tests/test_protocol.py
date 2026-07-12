@@ -196,6 +196,20 @@ class TestPingQuality(unittest.TestCase):
         self.assertGreater(loss, 10)                  # clearly lossy
         self.assertLess(loss, 60)
 
+    def test_loss_ages_out_of_window(self):
+        srv = self._server()
+        pid = bytes_4(312000)
+        win = CFG['GLOBAL']['PING_LOSS_WINDOW'] * 60   # seconds
+        # A burst of loss early, then a long stretch of clean pings that fills the
+        # whole window -- the old loss must fall out and the figure return to 0.
+        times = [0.0, 10.0, 40.0]                     # 40 = a 30s gap = lost pings
+        t = times[-1]
+        while t < times[0] + win + 120:               # clean 10s pings well past the window
+            t += 10.0
+            times.append(t)
+        self._feed_pings(srv, pid, times)
+        self.assertEqual(srv._ping_loss_pct(pid, times[-1]), 0)
+
 
 class MockWriteTransport:
     """Mimics enough of an asyncio Transport for ReportServer._send_json."""

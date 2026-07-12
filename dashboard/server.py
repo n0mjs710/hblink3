@@ -178,6 +178,7 @@ class State:
         self.clients = set()              # connected dashboard WebSockets
         self.ping_time = 5                # PING_TIME from hblink global config
         self.max_missed = 3               # MAX_MISSED from hblink global config
+        self.ping_loss_warn = 5           # PING_LOSS_WARN %: gold callsign at/above this
 
 STATE = State()
 
@@ -241,9 +242,11 @@ async def handle_event(evt):
             FEED_READ_TIMEOUT = max(float(interval) * 3, 30.0)
         STATE.ping_time = evt.get('ping_time', STATE.ping_time)
         STATE.max_missed = evt.get('max_missed', STATE.max_missed)
+        STATE.ping_loss_warn = evt.get('ping_loss_warn', STATE.ping_loss_warn)
         STATE.systems = enrich_config(evt['systems'])
         await broadcast({'type': 'config', 'systems': STATE.systems,
-                         'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed})
+                         'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed,
+                         'ping_loss_warn': STATE.ping_loss_warn})
     elif t == 'peer':
         # Granular repeater connect/disconnect delta. Apply it to the in-memory
         # systems view and re-broadcast the (enriched) config so the browser
@@ -259,7 +262,8 @@ async def handle_event(evt):
                 reps.pop(rid, None)
             STATE.systems = enrich_config(STATE.systems)
             await broadcast({'type': 'config', 'systems': STATE.systems,
-                             'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed})
+                             'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed,
+                         'ping_loss_warn': STATE.ping_loss_warn})
     elif t == 'bridges':
         STATE.bridges = enrich_bridges(evt['bridges'])
         await broadcast({'type': 'bridges', 'bridges': STATE.bridges})
@@ -405,6 +409,7 @@ def current_state():
         'log': list(STATE.log),
         'ping_time': STATE.ping_time,
         'max_missed': STATE.max_missed,
+        'ping_loss_warn': STATE.ping_loss_warn,
     }
 
 @app.websocket('/ws')

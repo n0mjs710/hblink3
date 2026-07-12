@@ -35,7 +35,6 @@ from random import randint
 from hashlib import sha256, sha1
 from hmac import new as hmac_new, compare_digest
 from time import time
-from math import exp
 from collections import deque
 import asyncio
 import socket
@@ -72,12 +71,10 @@ systems = {}
 # longer needs to run every REPORT_INTERVAL.
 REPORT_RESYNC_SECONDS = 60
 
-# Time constant (seconds) for the per-repeater ping-quality metric. Received and
-# missed pings both decay exponentially with this constant, VU-meter style: a
-# recent miss weighs most and old ones fade, so the quality value rises and falls
-# slowly and reflects *chronic* loss rather than momentary blips. Larger = slower
-# / longer memory. ~5 min reflects sustained loss without dwelling on old history.
-PING_QUALITY_TAU = 300.0
+# The per-repeater ping-loss metric is a plain sliding window: the percentage of
+# expected pings lost over the last GLOBAL['PING_LOSS_WINDOW'] minutes. Simple to
+# explain ("3% loss over the last 5 minutes") and exact. See _note_ping /
+# _ping_loss_pct.
 
 # Generic periodic-task runner replacing twisted's task.LoopingCall. Runs _func
 # every _interval seconds. Unlike a bare LoopingCall, a raised exception is logged
@@ -284,8 +281,11 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         for pid, r in self._repeaters.items():
             if r.get('CONNECTION') == 'YES':
                 r['PING_LOSS'] = self._ping_loss_pct(pid, _now)
-        for pid in [p for p, st in self._ping_q.items() if _now - st[2] > 2 * PING_QUALITY_TAU]:
-            del self._ping_q[pid]
+        # Prune history for repeaters with no pings left in the window (gone).
+        for pid in list(self._ping_q):
+            self._prune_pings(self._ping_q[pid]['ev'], _now)
+            if not self._ping_q[pid]['ev']:
+                del self._ping_q[pid]
         self.report_peer_deltas()
 
     # Emit granular 'peer' connected/disconnected events for any change since the
@@ -304,38 +304,42 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         self._reported_peers = current
 
     # Record one received ping and infer any pings lost since the previous one.
-    # Received and missed counts decay exponentially (PING_QUALITY_TAU) so the
-    # loss metric reflects recent/chronic behavior, not the whole session. The
-    # expected interval is self-calibrated per repeater (baseline), so a repeater
-    # that simply pings less often is not mistaken for lossy.
+    # Keeps a sliding window of recent ping events -- (timestamp, pings_missed_just
+    # before it) -- pruned to PING_LOSS_WINDOW minutes; _ping_loss_pct reads the
+    # window. The expected interval is self-calibrated per repeater (baseline), so
+    # a repeater that simply pings less often is not mistaken for lossy.
     def _note_ping(self, _peer_id, _now, _prev):
         st = self._ping_q.get(_peer_id)
-        if st is None:                         # first ping: seed, nothing to infer yet
-            self._ping_q[_peer_id] = [1.0, 0.0, _now, 0.0]   # recv, missed, last_t, baseline
-            return
-        decay = exp(-(_now - st[2]) / PING_QUALITY_TAU)
-        st[0] *= decay
-        st[1] *= decay
+        if st is None:
+            st = self._ping_q[_peer_id] = {'ev': deque(), 'base': 0.0}
+        base = st['base']
         gap = (_now - _prev) if _prev else 0.0
-        base = st[3]
+        missed = 0
         if base <= 0:
-            st[3] = gap if gap > 0 else 0.0    # first real interval seeds the cadence
+            st['base'] = gap if gap > 0 else 0.0   # first interval seeds the cadence
         elif gap <= base * 1.5:
-            st[3] = 0.9 * base + 0.1 * gap     # normal ping: track the cadence
+            st['base'] = 0.9 * base + 0.1 * gap    # normal ping: track the cadence
         else:
-            st[1] += round(gap / base) - 1     # abnormal gap: count the pings lost in it
-        st[0] += 1.0
-        st[2] = _now
+            missed = round(gap / base) - 1         # abnormal gap: pings lost in it
+        st['ev'].append((_now, missed))
+        self._prune_pings(st['ev'], _now)
 
-    # Decayed ping-loss percentage for a repeater (0 = clean, higher = lossier).
+    # Drop ping events older than the loss window.
+    def _prune_pings(self, _ev, _now):
+        cutoff = _now - self._CONFIG['GLOBAL']['PING_LOSS_WINDOW'] * 60
+        while _ev and _ev[0][0] < cutoff:
+            _ev.popleft()
+
+    # Ping-loss percentage over the window: missed / (received + missed), where
+    # received is one per event. 0 = clean, higher = lossier.
     def _ping_loss_pct(self, _peer_id, _now):
         st = self._ping_q.get(_peer_id)
         if not st:
             return 0
-        decay = exp(-(_now - st[2]) / PING_QUALITY_TAU)
-        recv = st[0] * decay
-        missed = st[1] * decay
-        total = recv + missed
+        self._prune_pings(st['ev'], _now)
+        received = len(st['ev'])
+        missed = sum(m for _, m in st['ev'])
+        total = received + missed
         return round(100.0 * missed / total) if total > 0 else 0
 
     # Aliased in __init__ to maintenance_loop if system is an outbound client
@@ -967,6 +971,8 @@ class ReportServer:
             'systems': json_systems(self._config['SYSTEMS']),
             'ping_time': self._config['GLOBAL'].get('PING_TIME', 5),
             'max_missed': self._config['GLOBAL'].get('MAX_MISSED', 3),
+            # Dashboard flags a repeater's callsign gold at/above this ping-loss %.
+            'ping_loss_warn': self._config['GLOBAL'].get('PING_LOSS_WARN', 5),
             # De-facto heartbeat interval; the dashboard sizes its "link dead"
             # read timeout relative to how often we actually push.
             'report_interval': self._config['REPORTS']['REPORT_INTERVAL'],

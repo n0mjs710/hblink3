@@ -24,6 +24,8 @@ INI format (`configparser`). Section names in `[BRACKETS]`; `KEY: value` pairs. 
 | `PATH` | Working directory for runtime files. `./` (the program's own directory) is normal. |
 | `PING_TIME` | Seconds between keepalive pings on Server/Client connections. |
 | `MAX_MISSED` | Missed pings before a connection is declared dead and torn down. |
+| `PING_LOSS_WINDOW` | Optional (default `5`, range `1`–`60`). Minutes over which the dashboard measures each repeater's **ping loss** — the share of expected keepalive pings that went missing. Larger = smoother / longer memory. Surfaces a repeater that stays connected but has a lossy link (choppy audio). A repeater that merely pings less often is not counted as lossy. |
+| `PING_LOSS_WARN` | Optional (default `5`). Ping-loss **percent** at or above which the dashboard turns a repeater's callsign gold. `0` disables the flag. |
 | `USE_ACL` | `True`/`False` top-level on/off switch for the **global** ACLs below. System-level ACLs are independent of this. |
 | `REG_ACL` | Registration ACL — which Client **radio IDs** may log in to any Server you host. ACL syntax below. |
 | `SUB_ACL` | Subscriber ACL — which **subscriber IDs** (the person keying up) may pass traffic, globally. |

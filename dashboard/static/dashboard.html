@@ -84,7 +84,7 @@
 </div>
 
 <script>
-const ST = { systems:{}, bridges:{}, active:{}, hang:{}, log:[], hblink:false, ping_time:5, max_missed:3 };
+const ST = { systems:{}, bridges:{}, active:{}, hang:{}, log:[], hblink:false, ping_time:5, max_missed:3, ping_loss_warn:5 };
 const STALE = 300000;   // backstop: drop an active call this many ms after START if no END arrives (well above amateur TOT)
 const LAST_HEARD_CFG   = '{{LAST_HEARD}}';                    // 'open' | 'closed' | 'off'
 const LAST_HEARD_COUNT = parseInt('{{LAST_HEARD_COUNT}}', 10) || 10;
@@ -179,7 +179,7 @@ function renderServers(){
       // server-side. A repeater that stays connected but loses pings over time
       // (choppy/lossy link) shows a rising loss %; a clean one sits at 0.
       const loss = p.PING_LOSS || 0;
-      const csStyle = loss >= 5 ? ' style="color:var(--warn)"' : '';
+      const csStyle = loss >= ST.ping_loss_warn ? ' style="color:var(--warn)"' : '';
       const lossTag = loss > 0 ? ' <span class="sub">· '+loss+'% ping loss</span>' : '';
       h+='<tr><td class="sysname"'+csStyle+'>'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+lossTag+'</div></td>'+
          '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+
@@ -377,12 +377,12 @@ function connect(){
   sock.onmessage=ev=>{
     const m=JSON.parse(ev.data);
     if(m.type==='initial'){ setConn(m.hblink); ST.systems=m.systems||{}; ST.bridges=m.bridges||{};
-      if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed;
+      if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed; if(m.ping_loss_warn!=null) ST.ping_loss_warn=m.ping_loss_warn;
       ST.active={}; (m.streams||[]).forEach(s=>{s._arrived=Date.now(); ST.active[skey(s)]=s;});
       ST.log=(m.log||[]).map(e=>{e._arrived=e._arrived||Date.now();return e;}); renderAll(); }
     else if(m.type==='hblink'){ setConn(m.connected); if(!m.connected){ST.systems={};ST.bridges={};ST.active={};renderAll();} }
     else if(m.type==='config'){ ST.systems=m.systems||{};
-      if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed;
+      if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed; if(m.ping_loss_warn!=null) ST.ping_loss_warn=m.ping_loss_warn;
       renderServers(); renderOutbounds(); renderOpenbridges(); }
     else if(m.type==='bridges'){ ST.bridges=m.bridges||{}; renderBridges(); }
     else if(m.type==='stream'){ applyStream(m); }
