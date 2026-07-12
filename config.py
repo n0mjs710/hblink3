@@ -151,7 +151,11 @@ def build_config(_config_file):
                     'REPORT': config.getboolean(section, 'REPORT'),
                     'REPORT_INTERVAL': config.getint(section, 'REPORT_INTERVAL'),
                     'REPORT_PORT': config.getint(section, 'REPORT_PORT'),
-                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS').split(',')
+                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS').split(','),
+                    # Reporting transport: 'tcp' (default, dashboard may be remote)
+                    # or 'unix' (same-box dashboard via REPORT_SOCKET path). Optional.
+                    'REPORT_TRANSPORT': config.get(section, 'REPORT_TRANSPORT', fallback='tcp').strip().lower(),
+                    'REPORT_SOCKET': config.get(section, 'REPORT_SOCKET', fallback='').strip(),
                 })
 
             elif section == 'LOGGER':

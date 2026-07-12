@@ -948,7 +948,10 @@ class BridgeReportServer(ReportServer):
         p = _data.split(',')
         try:
             event = {
-                'type':      'stream',
+                # Canonical vocabulary: 'stream_start' / 'stream_end'. The 'action'
+                # field is retained (START/END) -- the dashboard uses it for the
+                # log label and hang-time handling.
+                'type':      'stream_start' if p[1] == 'START' else 'stream_end',
                 'call_type': p[0],
                 'action':    p[1],
                 'trx':       p[2],

@@ -73,6 +73,17 @@ try:
 except ImportError:
     SERVER_REPEATERS = 'open'
 
+# Feed transport: 'tcp' (default, connect to HBLINK_IP:HBLINK_PORT) or 'unix'
+# (connect to the daemon's local Unix socket HBLINK_SOCKET). Optional in config.
+try:
+    from config import HBLINK_TRANSPORT
+except ImportError:
+    HBLINK_TRANSPORT = 'tcp'
+try:
+    from config import HBLINK_SOCKET
+except ImportError:
+    HBLINK_SOCKET = ''
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('hbdash')
 
@@ -247,7 +258,7 @@ async def handle_event(evt):
         await broadcast({'type': 'config', 'systems': STATE.systems,
                          'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed,
                          'ping_loss_warn': STATE.ping_loss_warn})
-    elif t == 'peer':
+    elif t in ('peer_connected', 'peer_disconnected'):
         # Granular repeater connect/disconnect delta. Apply it to the in-memory
         # systems view and re-broadcast the (enriched) config so the browser
         # renders it without waiting for the next full push. Ignored if the
@@ -256,9 +267,9 @@ async def handle_event(evt):
         if sysview is not None and sysview.get('MODE') == 'SERVER':
             reps = sysview.setdefault('REPEATERS', {})
             rid = str(evt.get('radio_id'))
-            if evt.get('action') == 'connected' and evt.get('info') is not None:
+            if t == 'peer_connected' and evt.get('info') is not None:
                 reps[rid] = evt['info']
-            elif evt.get('action') == 'disconnected':
+            elif t == 'peer_disconnected':
                 reps.pop(rid, None)
             STATE.systems = enrich_config(STATE.systems)
             await broadcast({'type': 'config', 'systems': STATE.systems,
@@ -267,7 +278,7 @@ async def handle_event(evt):
     elif t == 'bridges':
         STATE.bridges = enrich_bridges(evt['bridges'])
         await broadcast({'type': 'bridges', 'bridges': STATE.bridges})
-    elif t == 'stream':
+    elif t in ('stream_start', 'stream_end'):
         enrich_stream(evt)
         evt['_ts'] = time.time()   # authoritative server time so "Last Heard" age is correct across reloads
         key = stream_key(evt)
@@ -317,9 +328,13 @@ async def hblink_feed():
     while True:
         writer = None
         try:
-            reader, writer = await asyncio.open_connection(HBLINK_IP, HBLINK_PORT)
-            _enable_tcp_keepalive(writer)
-            logger.info('connected to HBlink3 feed at %s:%s', HBLINK_IP, HBLINK_PORT)
+            if HBLINK_TRANSPORT == 'unix':
+                reader, writer = await asyncio.open_unix_connection(HBLINK_SOCKET)
+                logger.info('connected to HBlink3 feed at unix socket %s', HBLINK_SOCKET)
+            else:
+                reader, writer = await asyncio.open_connection(HBLINK_IP, HBLINK_PORT)
+                _enable_tcp_keepalive(writer)
+                logger.info('connected to HBlink3 feed at %s:%s', HBLINK_IP, HBLINK_PORT)
             STATE.hblink = True
             await broadcast({'type': 'hblink', 'connected': True})
             while True:

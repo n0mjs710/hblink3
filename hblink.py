@@ -38,6 +38,7 @@ from time import time
 from collections import deque
 import asyncio
 import socket
+import os
 from bisect import bisect_right
 
 # Other files we pull from -- this is mostly for readability and segmentation
@@ -74,7 +75,9 @@ REPORT_RESYNC_SECONDS = 60
 # The per-repeater ping-loss metric is a plain sliding window: the percentage of
 # expected pings lost over the last GLOBAL['PING_LOSS_WINDOW'] minutes. Simple to
 # explain ("3% loss over the last 5 minutes") and exact. See _note_ping /
-# _ping_loss_pct.
+# _ping_loss_pct. PING_WARMUP is how many initial gaps are observed to calibrate a
+# repeater's ping cadence (median) before any loss is counted.
+PING_WARMUP = 4
 
 # Generic periodic-task runner replacing twisted's task.LoopingCall. Runs _func
 # every _interval seconds. Unlike a bare LoopingCall, a raised exception is logged
@@ -96,7 +99,7 @@ def config_reports(_config, _factory):
     logger.info('(REPORT) HBlink TCP reporting server configured')
     report_server = _factory(_config)
     loop = asyncio.get_event_loop()
-    loop.create_task(report_server.start(_config['REPORTS']['REPORT_PORT']))
+    loop.create_task(report_server.start())
     loop.create_task(run_periodic(_config['REPORTS']['REPORT_INTERVAL'],
                                   report_server.periodic_push, '(REPORT) periodic push'))
     return report_server
@@ -306,21 +309,26 @@ class HBSYSTEM(asyncio.DatagramProtocol):
     # Record one received ping and infer any pings lost since the previous one.
     # Keeps a sliding window of recent ping events -- (timestamp, pings_missed_just
     # before it) -- pruned to PING_LOSS_WINDOW minutes; _ping_loss_pct reads the
-    # window. The expected interval is self-calibrated per repeater (baseline), so
-    # a repeater that simply pings less often is not mistaken for lossy.
+    # window. The expected interval is self-calibrated per repeater from the MEDIAN
+    # of its first few gaps (robust to the odd short/long first interval), so a
+    # repeater that simply pings less often is not mistaken for lossy, and loss is
+    # only counted once the cadence is known.
     def _note_ping(self, _peer_id, _now, _prev):
         st = self._ping_q.get(_peer_id)
         if st is None:
-            st = self._ping_q[_peer_id] = {'ev': deque(), 'base': 0.0}
-        base = st['base']
+            st = self._ping_q[_peer_id] = {'ev': deque(), 'base': 0.0, 'warm': []}
         gap = (_now - _prev) if _prev else 0.0
         missed = 0
-        if base <= 0:
-            st['base'] = gap if gap > 0 else 0.0   # first interval seeds the cadence
-        elif gap <= base * 1.5:
-            st['base'] = 0.9 * base + 0.1 * gap    # normal ping: track the cadence
+        if st['base'] <= 0:                        # calibrating: no loss counted yet
+            if gap > 0:
+                st['warm'].append(gap)
+                if len(st['warm']) >= PING_WARMUP:
+                    st['base'] = sorted(st['warm'])[len(st['warm']) // 2]   # median
+                    st['warm'] = None
+        elif gap <= st['base'] * 1.5:
+            st['base'] = 0.9 * st['base'] + 0.1 * gap   # normal ping: track cadence
         else:
-            missed = round(gap / base) - 1         # abnormal gap: pings lost in it
+            missed = round(gap / st['base']) - 1        # abnormal gap: pings lost in it
         st['ev'].append((_now, missed))
         self._prune_pings(st['ev'], _now)
 
@@ -889,29 +897,51 @@ class ReportServer:
         self._config = _config
         self.clients = []   # list of asyncio.StreamWriter
 
-    async def start(self, port):
-        allowed = self._config['REPORTS']['REPORT_CLIENTS']
+    async def start(self):
+        # Transport is TCP by default (dashboards commonly run on a separate host).
+        # REPORT_TRANSPORT=unix binds a local Unix-domain socket instead -- a
+        # same-box dashboard that can't NIC-flap or be conntrack-evicted, retiring
+        # the whole silent-severance class. Mirrors hblink4's transport selector.
+        reports = self._config['REPORTS']
+        transport = reports.get('REPORT_TRANSPORT', 'tcp')
+        allowed = reports['REPORT_CLIENTS']
         try:
-            server = await asyncio.start_server(
-                lambda r, w: self._client_connected(r, w, allowed),
-                host='0.0.0.0',
-                port=port,
-            )
+            if transport == 'unix':
+                path = reports.get('REPORT_SOCKET', '')
+                # Remove a stale socket file left by an unclean exit before binding.
+                if path and os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+                server = await asyncio.start_unix_server(
+                    lambda r, w: self._client_connected(r, w, allowed, unix=True), path=path)
+                logger.info('(REPORT) HBlink reporting server listening on unix socket %s', path)
+            else:
+                server = await asyncio.start_server(
+                    lambda r, w: self._client_connected(r, w, allowed, unix=False),
+                    host='0.0.0.0', port=reports['REPORT_PORT'])
+                logger.info('(REPORT) HBlink reporting server listening on port %s', reports['REPORT_PORT'])
         except OSError as e:
-            logger.error('(REPORT) Reporting server could not bind port %s: %s', port, e)
+            logger.error('(REPORT) Reporting server could not bind (%s): %s', transport, e)
             return
-        logger.info('(REPORT) HBlink reporting server listening on port %s', port)
         async with server:
             await server.serve_forever()
 
-    async def _client_connected(self, reader, writer, allowed):
-        addr = writer.get_extra_info('peername')
-        if '*' not in allowed and addr[0] not in allowed:
-            logger.warning('(REPORT) Connection rejected from %s', addr[0])
-            writer.close()
-            return
-        logger.info('(REPORT) Reporting client connected: %s:%s', addr[0], addr[1])
-        _enable_tcp_keepalive(writer)
+    async def _client_connected(self, reader, writer, allowed, unix=False):
+        if unix:
+            # Filesystem permissions govern a Unix socket -- no IP ACL, and a local
+            # socket can't silently sever so TCP keepalive is moot.
+            peer = 'unix'
+        else:
+            addr = writer.get_extra_info('peername')
+            if '*' not in allowed and addr[0] not in allowed:
+                logger.warning('(REPORT) Connection rejected from %s', addr[0])
+                writer.close()
+                return
+            peer = '%s:%s' % (addr[0], addr[1])
+            _enable_tcp_keepalive(writer)
+        logger.info('(REPORT) Reporting client connected: %s', peer)
         self.clients.append(writer)
         self.send_config()
         self.send_bridge()
@@ -932,7 +962,7 @@ class ReportServer:
                 await writer.wait_closed()
             except Exception:
                 pass
-            logger.info('(REPORT) Reporting client disconnected: %s:%s', addr[0], addr[1])
+            logger.info('(REPORT) Reporting client disconnected: %s', peer)
 
     def _send_json(self, obj):
         data = (json.dumps(obj) + '\n').encode()
@@ -989,7 +1019,9 @@ class ReportServer:
     # config push. _info is a json_repeater() view on 'connected', omitted on
     # 'disconnected'.
     def send_peer(self, _system, _radio_id, _action, _info=None):
-        evt = {'type': 'peer', 'system': _system, 'radio_id': _radio_id, 'action': _action}
+        # Canonical vocabulary: 'peer_connected' / 'peer_disconnected' (the type
+        # carries the lifecycle; _action is 'connected'|'disconnected').
+        evt = {'type': 'peer_' + _action, 'system': _system, 'radio_id': _radio_id}
         if _info is not None:
             evt['info'] = _info
         self._send_json(evt)

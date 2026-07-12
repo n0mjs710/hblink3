@@ -385,7 +385,7 @@ function connect(){
       if(m.ping_time) ST.ping_time=m.ping_time; if(m.max_missed) ST.max_missed=m.max_missed; if(m.ping_loss_warn!=null) ST.ping_loss_warn=m.ping_loss_warn;
       renderServers(); renderOutbounds(); renderOpenbridges(); }
     else if(m.type==='bridges'){ ST.bridges=m.bridges||{}; renderBridges(); }
-    else if(m.type==='stream'){ applyStream(m); }
+    else if(m.type==='stream_start'||m.type==='stream_end'){ applyStream(m); }
   };
   sock.onclose=()=>{ setConn(false); el('conn').textContent='HBlink: dashboard offline'; setTimeout(connect,2000); };
 }

@@ -196,19 +196,28 @@ class TestPingQuality(unittest.TestCase):
         self.assertGreater(loss, 10)                  # clearly lossy
         self.assertLess(loss, 60)
 
-    def test_loss_ages_out_of_window(self):
-        srv = self._server()
-        pid = bytes_4(312000)
+    def test_loss_registers_then_ages_out(self):
         win = CFG['GLOBAL']['PING_LOSS_WINDOW'] * 60   # seconds
-        # A burst of loss early, then a long stretch of clean pings that fills the
-        # whole window -- the old loss must fall out and the figure return to 0.
-        times = [0.0, 10.0, 40.0]                     # 40 = a 30s gap = lost pings
+        pid = bytes_4(312000)
+        # Clean warmup (calibrates base=10s), then a burst of dropped pings.
+        times = [i * 10.0 for i in range(6)]
         t = times[-1]
-        while t < times[0] + win + 120:               # clean 10s pings well past the window
+        for _ in range(5):                            # 5 drops: 20s gaps = lost pings
+            t += 20.0
+            times.append(t)
+        srv = self._server()
+        self._feed_pings(srv, pid, times)
+        self.assertGreater(srv._ping_loss_pct(pid, times[-1]), 0)   # loss registered
+
+        # Same start, then clean pings filling more than the whole window: the old
+        # loss must fall out of the window and the figure return to 0.
+        loss_end = times[-1]              # fix the bound BEFORE extending `times`
+        while t < loss_end + win + 30:    # (appending inside made times[-1] track t -> infinite loop)
             t += 10.0
             times.append(t)
-        self._feed_pings(srv, pid, times)
-        self.assertEqual(srv._ping_loss_pct(pid, times[-1]), 0)
+        srv2 = self._server()
+        self._feed_pings(srv2, pid, times)
+        self.assertEqual(srv2._ping_loss_pct(pid, times[-1]), 0)
 
 
 class MockWriteTransport:
@@ -315,13 +324,14 @@ class TestBridgeStreamEvents(unittest.TestCase):
         srv, cap = self._server()
         srv.send_bridge_event(b'GROUP VOICE,START,RX,SERVER-1,123,312000,3120001,1,3100')
         self.assertEqual(cap[0], {
-            'type': 'stream', 'call_type': 'GROUP VOICE', 'action': 'START',
+            'type': 'stream_start', 'call_type': 'GROUP VOICE', 'action': 'START',
             'trx': 'RX', 'system': 'SERVER-1', 'stream_id': 123, 'peer': 312000,
             'src': 3120001, 'slot': 1, 'dst': 3100})
 
     def test_end_csv_includes_duration(self):
         srv, cap = self._server()
         srv.send_bridge_event('GROUP VOICE,END,TX,SERVER-1,123,312000,3120001,2,3100,4.20')
+        self.assertEqual(cap[0]['type'], 'stream_end')
         self.assertEqual(cap[0]['action'], 'END')
         self.assertEqual(cap[0]['slot'], 2)
         self.assertEqual(cap[0]['duration'], 4.20)
