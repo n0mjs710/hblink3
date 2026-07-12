@@ -76,8 +76,8 @@ REPORT_RESYNC_SECONDS = 60
 # missed pings both decay exponentially with this constant, VU-meter style: a
 # recent miss weighs most and old ones fade, so the quality value rises and falls
 # slowly and reflects *chronic* loss rather than momentary blips. Larger = slower
-# / longer memory. ~15 min gives a clearly-moving-but-not-twitchy value.
-PING_QUALITY_TAU = 900.0
+# / longer memory. ~5 min reflects sustained loss without dwelling on old history.
+PING_QUALITY_TAU = 300.0
 
 # Generic periodic-task runner replacing twisted's task.LoopingCall. Runs _func
 # every _interval seconds. Unlike a bare LoopingCall, a raised exception is logged
