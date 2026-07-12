@@ -49,7 +49,6 @@ from dmr_utils3.utils import int_id, bytes_4, try_download, mk_id_dict
 
 # Imports for the reporting server
 import json
-from reporting_const import *
 
 # The module needs logging logging, but handlers, etc. are controlled by the parent
 import logging

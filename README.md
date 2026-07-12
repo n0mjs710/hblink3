@@ -15,7 +15,6 @@ HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol
 | Program | Purpose |
 |---|---|
 | `bridge.py` | The main application: a configurable conference-bridge call router with dynamic on/off triggering, timeouts, and private (unit) call routing. |
-| `bridge_all.py` | A simple proxy that forwards all traffic between every configured system — makes several repeaters appear as one. |
 | `hblink.py` | The protocol core. Runs standalone as a server/outbound system for testing, and is the module the applications are built on. |
 
 ## Features

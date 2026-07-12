@@ -7,8 +7,8 @@
 #
 # Adjust User/Group and the paths below to your install. bridge.py defaults to
 # hblink.cfg and rules.py in its own directory; pass -c/-r in ExecStart to use
-# other files. To run a different app (e.g. the plain proxy), point ExecStart at
-# bridge_all.py or hblink.py instead.
+# other files. To run the protocol core standalone, point ExecStart at hblink.py
+# instead.
 
 [Unit]
 Description=HBlink3 DMR Conference Bridge Router

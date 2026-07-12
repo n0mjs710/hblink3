@@ -114,8 +114,8 @@ for a non-local dashboard or a feed interruption).
 ## Conference Bridges
 
 One table per conference bridge defined in `rules.py`, with a row per member
-system. (Empty if you're running `bridge_all` or standalone `hblink.py`, which
-have no conference-bridge rules.)
+system. (Empty if you're running standalone `hblink.py`, which has no
+conference-bridge rules.)
 
 | Column | Meaning |
 |---|---|

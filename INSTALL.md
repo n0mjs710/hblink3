@@ -64,8 +64,6 @@ Every system named in `rules.py` must exist and be enabled in `hblink.cfg`. **Up
 source venv/bin/activate
 python bridge.py -c hblink.cfg -r rules.py     # conference-bridge router (main app)
 # or
-python bridge_all.py -c hblink.cfg             # forward-everything proxy
-# or
 python hblink.py -c hblink.cfg                 # protocol core, standalone server/outbound
 ```
 
@@ -96,4 +94,4 @@ sudo systemctl restart hblink3
 
 ## Notes
 
-- The legacy voice utilities (`playback.py`, `play_ambe.py`) are **not** migrated to asyncio and will not run against the current core.
+- Legacy, unmaintained code lives in [`archive/`](archive/) and is excluded from packaging. It includes the Twisted-era voice utilities (`playback.py`, `play_ambe.py`, `mk_voice.py`, `voice_lib.py`), the old opcode reporting constants (`reporting_const.py`), and `bridge_all.py` (a forward-everything proxy that was never ported to the asyncio core). None of it runs against the current core.

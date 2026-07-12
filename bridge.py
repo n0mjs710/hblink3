@@ -38,7 +38,7 @@ import importlib.util
 import asyncio
 
 # Things we import from the main hblink module
-from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, ReportServer, config_reports, REPORT_OPCODES, mk_aliases, run_periodic
+from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, ReportServer, config_reports, mk_aliases, run_periodic
 from dmr_utils3.utils import bytes_3, int_id, get_alias
 from dmr_utils3 import decode, bptc, const
 import config

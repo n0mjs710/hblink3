@@ -44,4 +44,4 @@ Homepage = "https://github.com/n0mjs710/hblink3"
 # The core routing modules. Listed explicitly because they are top-level modules
 # rather than a package, so a `pip install .` resolves them correctly.
 [tool.setuptools]
-py-modules = ["hblink", "bridge", "bridge_all", "config", "const", "log", "reporting_const"]
+py-modules = ["hblink", "bridge", "config", "const", "log"]
