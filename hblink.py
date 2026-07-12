@@ -35,6 +35,7 @@ from random import randint
 from hashlib import sha256, sha1
 from hmac import new as hmac_new, compare_digest
 from time import time
+from math import exp
 from collections import deque
 import asyncio
 import socket
@@ -70,6 +71,13 @@ systems = {}
 # tiny heartbeat -- state changes are event-driven, so the heavy full push no
 # longer needs to run every REPORT_INTERVAL.
 REPORT_RESYNC_SECONDS = 60
+
+# Time constant (seconds) for the per-repeater ping-quality metric. Received and
+# missed pings both decay exponentially with this constant, VU-meter style: a
+# recent miss weighs most and old ones fade, so the quality value rises and falls
+# slowly and reflects *chronic* loss rather than momentary blips. Larger = slower
+# / longer memory. ~15 min gives a clearly-moving-but-not-twitchy value.
+PING_QUALITY_TAU = 900.0
 
 # Generic periodic-task runner replacing twisted's task.LoopingCall. Runs _func
 # every _interval seconds. Unlike a bare LoopingCall, a raised exception is logged
@@ -231,6 +239,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         if self._config['MODE'] == 'SERVER':
             self._repeaters = self._CONFIG['SYSTEMS'][self._system]['REPEATERS']
             self._reported_peers = set()   # peer ids last reported 'connected' to the dashboard
+            self._ping_q = {}              # peer id -> [recv, missed, last_t]: decaying ping-quality state
             self.send_system = self.send_repeaters
             self.maintenance_loop = self.server_maintenance_loop
             self.datagram_received = self.server_datagram_received
@@ -269,6 +278,14 @@ class HBSYSTEM(asyncio.DatagramProtocol):
             logger.info('(%s) Repeater %s (%s) has timed out and is being removed', self._system, self._repeaters[repeater]['CALLSIGN'], self._repeaters[repeater]['RADIO_ID'])
             # Remove any timed out repeaters from the configuration
             del self._CONFIG['SYSTEMS'][self._system]['REPEATERS'][repeater]
+        # Refresh the ping-loss quality figure for each connected repeater (it
+        # rides the next config snapshot), and prune long-idle history.
+        _now = time()
+        for pid, r in self._repeaters.items():
+            if r.get('CONNECTION') == 'YES':
+                r['PING_LOSS'] = self._ping_loss_pct(pid, _now)
+        for pid in [p for p, st in self._ping_q.items() if _now - st[2] > 2 * PING_QUALITY_TAU]:
+            del self._ping_q[pid]
         self.report_peer_deltas()
 
     # Emit granular 'peer' connected/disconnected events for any change since the
@@ -285,6 +302,41 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         for pid in self._reported_peers - current:
             self._report.send_peer(self._system, int_id(pid), 'disconnected')
         self._reported_peers = current
+
+    # Record one received ping and infer any pings lost since the previous one.
+    # Received and missed counts decay exponentially (PING_QUALITY_TAU) so the
+    # loss metric reflects recent/chronic behavior, not the whole session. The
+    # expected interval is self-calibrated per repeater (baseline), so a repeater
+    # that simply pings less often is not mistaken for lossy.
+    def _note_ping(self, _peer_id, _now, _prev):
+        st = self._ping_q.get(_peer_id)
+        if st is None:                         # first ping: seed, nothing to infer yet
+            self._ping_q[_peer_id] = [1.0, 0.0, _now, 0.0]   # recv, missed, last_t, baseline
+            return
+        decay = exp(-(_now - st[2]) / PING_QUALITY_TAU)
+        st[0] *= decay
+        st[1] *= decay
+        gap = (_now - _prev) if _prev else 0.0
+        base = st[3]
+        if base <= 0:
+            st[3] = gap if gap > 0 else 0.0    # first real interval seeds the cadence
+        elif gap <= base * 1.5:
+            st[3] = 0.9 * base + 0.1 * gap     # normal ping: track the cadence
+        else:
+            st[1] += round(gap / base) - 1     # abnormal gap: count the pings lost in it
+        st[0] += 1.0
+        st[2] = _now
+
+    # Decayed ping-loss percentage for a repeater (0 = clean, higher = lossier).
+    def _ping_loss_pct(self, _peer_id, _now):
+        st = self._ping_q.get(_peer_id)
+        if not st:
+            return 0
+        decay = exp(-(_now - st[2]) / PING_QUALITY_TAU)
+        recv = st[0] * decay
+        missed = st[1] * decay
+        total = recv + missed
+        return round(100.0 * missed / total) if total > 0 else 0
 
     # Aliased in __init__ to maintenance_loop if system is an outbound client
     def outbound_maintenance_loop(self):
@@ -572,8 +624,10 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 if _peer_id in self._repeaters \
                             and self._repeaters[_peer_id]['CONNECTION'] == "YES" \
                             and self._repeaters[_peer_id]['SOCKADDR'] == _sockaddr:
+                    _now = time()
+                    self._note_ping(_peer_id, _now, self._repeaters[_peer_id]['LAST_PING'])
                     self._repeaters[_peer_id]['PINGS_RECEIVED'] += 1
-                    self._repeaters[_peer_id]['LAST_PING'] = time()
+                    self._repeaters[_peer_id]['LAST_PING'] = _now
                     self.send_repeater(_peer_id, b''.join([MSTPONG, _peer_id]))
                     logger.debug('(%s) Received and answered RPTPING from repeater %s (%s)', self._system, self._repeaters[_peer_id]['CALLSIGN'], int_id(_peer_id))
                 else:
@@ -753,6 +807,7 @@ def json_repeater(_pid, _p):
         'RX_FREQ':    _s(_p.get('RX_FREQ', '')),
         'TX_FREQ':    _s(_p.get('TX_FREQ', '')),
         'SLOTS':      _s(_p.get('SLOTS', '')),
+        'PING_LOSS':  _p.get('PING_LOSS', 0),
     }
 
 

@@ -175,13 +175,13 @@ function renderServers(){
         // TX (red) for the others, which are hearing the repeated traffic.
         return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx', hang); };
       const freq = (p.RX_FREQ&&p.RX_FREQ.slice(0,3)!=='000') ? 'RX '+fmtFreq(p.RX_FREQ)+'<br>TX '+fmtFreq(p.TX_FREQ) : '<span class="sub">N/A</span>';
-      // Point-in-time "missed ping" warn retired: it was a poor proxy and it
-      // false-fires now that full state is pushed only on a slow resync. A
-      // cumulative "chronic connectivity" indicator (from missed/disconnect
-      // events) will replace it.
-      const warn = false;
-      const csStyle = warn ? ' style="color:var(--warn)"' : '';
-      h+='<tr><td class="sysname"'+csStyle+'>'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+'</div></td>'+
+      // Chronic connectivity: PING_LOSS is a slow, decaying ping-loss % computed
+      // server-side. A repeater that stays connected but loses pings over time
+      // (choppy/lossy link) shows a rising loss %; a clean one sits at 0.
+      const loss = p.PING_LOSS || 0;
+      const csStyle = loss >= 5 ? ' style="color:var(--warn)"' : '';
+      const lossTag = loss > 0 ? ' <span class="sub">· '+loss+'% ping loss</span>' : '';
+      h+='<tr><td class="sysname"'+csStyle+'>'+idName(p.CALLSIGN,p.RADIO_ID)+'<div class="sub">'+esc(p.LOCATION||'')+lossTag+'</div></td>'+
          '<td class="mono">'+esc(p.IP)+':'+esc(p.PORT)+'<div class="sub">up <span class="js-since" data-base="'+(p.connected_secs||0)+'" data-arr="'+Date.now()+'">'+dur(p.connected_secs||0)+'</span></div></td>'+
          '<td class="mono sub">'+freq+'</td><td class="mono">'+fmtSlots(p.SLOTS)+'</td>'+
          '<td>'+cell(1)+'</td><td>'+cell(2)+'</td></tr>';

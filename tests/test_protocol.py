@@ -153,6 +153,50 @@ class TestPeerEvents(unittest.TestCase):
         self.assertEqual(disc[0][1], 312000)
 
 
+class TestPingQuality(unittest.TestCase):
+    """Per-repeater ping-loss %: self-calibrated cadence, decaying, cadence-agnostic."""
+
+    def _server(self):
+        srv = hblink.HBSYSTEM('SERVER-1', CFG, None)
+        srv.transport = MockDatagramTransport()
+        return srv
+
+    def _feed_pings(self, srv, pid, times):
+        # Drive _note_ping with an explicit sequence of arrival timestamps.
+        prev = times[0]
+        srv._note_ping(pid, times[0], 0)              # first ping, seeds
+        for t in times[1:]:
+            srv._note_ping(pid, t, prev)
+            prev = t
+
+    def test_clean_pings_zero_loss(self):
+        srv = self._server()
+        pid = bytes_4(312000)
+        self._feed_pings(srv, pid, [i * 10.0 for i in range(30)])   # every 10s, no gaps
+        self.assertEqual(srv._ping_loss_pct(pid, 300.0), 0)
+
+    def test_slower_cadence_is_not_loss(self):
+        srv = self._server()
+        pid = bytes_4(312000)
+        # Pings every 30s (much slower than GLOBAL PING_TIME) must NOT read as loss.
+        self._feed_pings(srv, pid, [i * 30.0 for i in range(20)])
+        self.assertEqual(srv._ping_loss_pct(pid, 600.0), 0)
+
+    def test_dropped_pings_register_loss(self):
+        srv = self._server()
+        pid = bytes_4(312000)
+        # Establish a 10s cadence, then drop roughly 1 of every 3 pings.
+        times = [i * 10.0 for i in range(10)]         # clean baseline
+        t = times[-1]
+        for k in range(20):
+            t += 30.0 if k % 3 == 0 else 10.0         # every 3rd interval misses 2 pings
+            times.append(t)
+        self._feed_pings(srv, pid, times)
+        loss = srv._ping_loss_pct(pid, times[-1])
+        self.assertGreater(loss, 10)                  # clearly lossy
+        self.assertLess(loss, 60)
+
+
 class MockWriteTransport:
     """Mimics enough of an asyncio Transport for ReportServer._send_json."""
     def __init__(self, buffer_size=0):
