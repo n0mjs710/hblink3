@@ -213,6 +213,32 @@ BRIDGES = {
 
 Here anything on `SERVER-1` TS1/TG1 reaches `CLIENT-1` TS1/TG3100 and vice-versa (talkgroups are rewritten per entry). On `WORLDWIDE`, keying TG2 turns a system on for 2 minutes; TG9 or TG10 turns it off. `STATEWIDE` has no timers.
 
+## `OBP_BRIDGES`
+
+**OpenBridge (`MODE: OPENBRIDGE`) systems are configured here, not as inline `BRIDGES` members.** An OpenBridge is a point-to-point trunk that passes talkgroups by TGID — it has no RF user to key `ON`/`OFF`/`TIMEOUT` triggers and no meaningful timeslot — so it declares a compact per-OBP table mapping **bridge → TGID** instead:
+
+```python
+OBP_BRIDGES = {
+    'VESTA_OBP': {              # an OPENBRIDGE system from hblink.cfg
+        'WORLDWIDE': 1,
+        'STATEWIDE': 3129,
+        'ENGLISH':   (13, 2),  # optional (TGID, TS) form; TS defaults to 1 otherwise
+    },
+}
+```
+
+Read one row as **"on this OpenBridge, this TGID *is* this bridge."** That single fact is the route in **both** directions and the filter: at startup `bridge.py` expands each row into a bridge member, so a TGID **not** listed for an OBP is simply never routed — dropped **fail-closed**, in and out. There is no separate ACL.
+
+| Rule | Behavior |
+|---|---|
+| TS | Defaults to `1` (OpenBridge's "no timeslot" placeholder). Override with the `(TGID, TS)` tuple form. |
+| Triggers | None — `TO_TYPE`/`TIMEOUT`/`ON`/`OFF` don't apply to a trunk and are omitted. |
+| OBP system left as an inline `BRIDGES` member | **Startup ERROR** (move it into `OBP_BRIDGES`). |
+| Same OBP maps one TGID → two bridges (**ingress fork**) | **Startup ERROR** — it would duplicate the stream. |
+| A bridge carrying **different** TGIDs on two OBPs (**renumber in transit**) | Allowed, logs a **WARNING** — usually a typo, occasionally intentional at a network boundary. |
+
+`OBP_BRIDGES` is optional — omit it (or leave it `{}`) if you run no OpenBridges.
+
 ## `UNIT`
 
 ```python

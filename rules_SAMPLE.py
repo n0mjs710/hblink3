@@ -33,6 +33,34 @@ BRIDGES = {
 }
 
 '''
+OpenBridge (OBP) systems are NOT configured as inline BRIDGES members above.
+An OBP is a point-to-point trunk that passes talkgroups by TGID -- it has no RF
+user to key ON/OFF timers and no real timeslot -- so it gets its own table:
+
+    OBP_BRIDGES = { <OBP system from hblink.cfg> : { <bridge name> : <TGID> } }
+
+Read a row as "on THIS OpenBridge, this TGID *is* this bridge." That one fact is
+the route in BOTH directions and the filter: a TGID not listed for an OBP is
+dropped (fail-closed). At startup bridge.py expands each row into a bridge member
+for you. Notes:
+    * TS defaults to 1 (OBP "no timeslot" placeholder). To override: (TGID, TS).
+    * The OBP system name must be an enabled MODE: OPENBRIDGE system in hblink.cfg.
+    * Leaving an OBP system as an inline BRIDGES member above is a startup ERROR.
+    * On one OBP, a TGID may map to only one bridge (a fork duplicates the stream)
+      -> startup ERROR. A bridge carrying different TGIDs on two OBPs (renumber in
+      transit) is allowed but logs a WARNING.
+    * OBP_BRIDGES is optional -- omit it or leave it {} if you run no OpenBridges.
+'''
+
+OBP_BRIDGES = {
+    # 'BACKBONE-OBP': {
+    #     'WORLDWIDE': 1,
+    #     'STATEWIDE': 3129,
+    #     'ENGLISH':   (13, 2),    # TGID 13 pinned to TS 2 (override)
+    # },
+}
+
+'''
 UNIT: system names that should bridge unit-to-unit (individual/private) calls to each other.
 '''
 
@@ -46,4 +74,5 @@ like it were a Python program itself will tell you if the syntax is correct!
 if __name__ == '__main__':
     from pprint import pprint
     pprint(BRIDGES)
+    pprint(OBP_BRIDGES)
     print(UNIT)

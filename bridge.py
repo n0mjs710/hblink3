@@ -128,6 +128,66 @@ def make_bridges(_rules):
     return _rules
 
 
+# OBP systems are configured in a separate per-OBP table (OBP_BRIDGES in rules.py),
+# NOT as inline bridge members: {obp_system: {bridge_name: tgid_or_(tgid, ts)}}.
+# Each row means "on THIS OpenBridge, this TGID *is* this bridge" -- the route in
+# both directions and, because an unmapped TGID is never a routing key, the
+# fail-closed filter too. We expand each row into an ordinary synthetic bridge
+# member and append it to the named bridge, so the forwarding path runs unchanged.
+# Triggers (TO_TYPE/TIMEOUT/ON/OFF) are meaningless for a trunk -- there is no RF
+# user to key them up -- so they are hard-wired inert and a TGID-heavy trunk costs
+# no rule-timer work. Runs before make_bridges() (operates on raw int TGIDs).
+#
+# Validation at load (design spec §3.3/§3.5):
+#   * intra-OBP 1:1 -- a TGID mapped to >1 bridge on one OBP (ingress fork) is a hard
+#     startup ERROR; it would duplicate the stream into multiple bridges. (The mirror
+#     case, a bridge holding >1 TGID for one OBP, is structurally impossible here --
+#     {bridge: tgid} keys a bridge to exactly one TGID -- so it needs no check.)
+#   * inter-OBP renumber -- a bridge carrying different TGIDs on two OBPs is a
+#     non-blocking WARNING (legit backbone translation, but often a typo).
+#   * an OBP system left as an old-style inline BRIDGES member is a hard ERROR.
+def expand_obp_bridges(_bridges, _obp_bridges):
+    def _is_obp(_sys):
+        return _sys in CONFIG['SYSTEMS'] and CONFIG['SYSTEMS'][_sys]['MODE'] == 'OPENBRIDGE'
+
+    # Reject old-style inline OBP membership -- moving it out is the whole point.
+    for _bridge, _members in _bridges.items():
+        for _m in _members:
+            if _is_obp(_m['SYSTEM']):
+                sys.exit('ERROR: OpenBridge system "{}" is an inline member of bridge "{}". '
+                         'OBP systems now belong in the OBP_BRIDGES table in rules.py, not in BRIDGES.'
+                         .format(_m['SYSTEM'], _bridge))
+
+    _bridge_obp_tgid = {}   # bridge -> {obp: tgid}, for the inter-OBP renumber lint
+
+    for _obp, _table in _obp_bridges.items():
+        if not _is_obp(_obp):
+            sys.exit('ERROR: OBP_BRIDGES entry "{}" is not an enabled OPENBRIDGE system in the main configuration'.format(_obp))
+        _tgid_to_bridge = {}   # intra-OBP 1:1 ingress-fork check
+        for _bridge, _val in _table.items():
+            _tgid, _ts = _val if isinstance(_val, (tuple, list)) else (_val, 1)
+
+            if _tgid in _tgid_to_bridge and _tgid_to_bridge[_tgid] != _bridge:
+                sys.exit('ERROR: OBP "{}" TGID {} maps to more than one bridge ("{}" and "{}") -- '
+                         'an ingress fork would duplicate the stream'
+                         .format(_obp, _tgid, _tgid_to_bridge[_tgid], _bridge))
+            _tgid_to_bridge[_tgid] = _bridge
+
+            _bridges.setdefault(_bridge, []).append({
+                'SYSTEM': _obp, 'TS': _ts, 'TGID': _tgid, 'ACTIVE': True,
+                'TIMEOUT': 2, 'TO_TYPE': 'NONE', 'ON': [], 'OFF': [], 'RESET': [],
+            })
+            _bridge_obp_tgid.setdefault(_bridge, {})[_obp] = _tgid
+
+    for _bridge, _obp_tgids in _bridge_obp_tgid.items():
+        if len(set(_obp_tgids.values())) > 1:
+            _detail = ', '.join('{}={}'.format(o, t) for o, t in sorted(_obp_tgids.items()))
+            logger.warning('(ROUTER) Bridge "%s" renumbers TGID across OpenBridges (%s) -- '
+                           'legal but unusual; confirm intentional', _bridge, _detail)
+
+    return _bridges
+
+
 # Build the routing indexes from the processed BRIDGES structure. Call once after
 # make_bridges() (and again only if bridge membership is ever rebuilt at runtime).
 # src_index: (system, ts, tgid) -> [(bridge_name, source_member, sibling_members), ...]
@@ -1028,8 +1088,10 @@ if __name__ == '__main__':
     except (ImportError, FileNotFoundError):
         sys.exit('(ROUTER) TERMINATING: Routing bridges file not found or invalid: {}'.format(cli_args.RULES_FILE))
 
-    # Build the routing rules file
-    BRIDGES = make_bridges(rules_module.BRIDGES)
+    # Expand the per-OBP TGID<->bridge table (rules.OBP_BRIDGES, optional) into
+    # synthetic bridge members, then build the routing rules file.
+    _obp_bridges = getattr(rules_module, 'OBP_BRIDGES', {})
+    BRIDGES = make_bridges(expand_obp_bridges(rules_module.BRIDGES, _obp_bridges))
 
     # Build the per-frame routing lookup indexes from the rules
     BRIDGE_SRC_INDEX, BRIDGE_BY_SYSTEM = index_bridges(BRIDGES)
