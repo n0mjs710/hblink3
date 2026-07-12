@@ -276,6 +276,8 @@ async def handle_event(evt):
         if evt['trx'] == 'RX':
             STATE.log.appendleft(evt)
         await broadcast(evt)
+    elif t == 'ping':
+        pass   # liveness heartbeat; receiving it already reset the feed read timeout
     else:
         logger.debug('ignoring unknown event type: %s', t)
 

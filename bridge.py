@@ -967,8 +967,11 @@ class BridgeReportServer(ReportServer):
         self._send_json(event)
 
     def periodic_push(self):
-        self.send_config()
-        self.send_bridge()
+        # Full config+bridge only on the resync tick; heartbeat otherwise (base
+        # class). Bridge changes already propagate on-change via rule_timer_loop.
+        if self._resync_due():
+            self.send_config()
+            self.send_bridge()
 
 
 #************************************************

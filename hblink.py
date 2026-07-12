@@ -65,6 +65,12 @@ __email__      = 'n0mjs@me.com'
 # Global variables used whether we are a module or __main__
 systems = {}
 
+# How often the reporting server sends a full state resync (config/bridge) as a
+# reconciliation safety net. Between resyncs it sends only granular deltas plus a
+# tiny heartbeat -- state changes are event-driven, so the heavy full push no
+# longer needs to run every REPORT_INTERVAL.
+REPORT_RESYNC_SECONDS = 60
+
 # Generic periodic-task runner replacing twisted's task.LoopingCall. Runs _func
 # every _interval seconds. Unlike a bare LoopingCall, a raised exception is logged
 # and the loop continues, so a transient error can't silently kill the timer.
@@ -927,8 +933,23 @@ class ReportServer:
             evt['info'] = _info
         self._send_json(evt)
 
+    # True on the periodic ticks where a full state resync is due (a reconciliation
+    # safety net, ~REPORT_RESYNC_SECONDS apart); on the other ticks send only a
+    # tiny heartbeat so the dashboard's link-liveness timeout stays fed without
+    # re-pushing full state. Real state changes travel as granular events
+    # (send_peer, send_bridge), so the full push no longer needs to be frequent.
+    def _resync_due(self):
+        self._resync_tick = getattr(self, '_resync_tick', -1) + 1
+        interval = max(1, self._config['REPORTS'].get('REPORT_INTERVAL', 10))
+        every = max(1, round(REPORT_RESYNC_SECONDS / interval))
+        if self._resync_tick % every == 0:
+            return True
+        self._send_json({'type': 'ping'})
+        return False
+
     def periodic_push(self):
-        self.send_config()
+        if self._resync_due():
+            self.send_config()
 
 
 # ID ALIAS CREATION
