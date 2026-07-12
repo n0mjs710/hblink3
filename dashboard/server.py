@@ -258,7 +258,7 @@ async def handle_event(evt):
         await broadcast({'type': 'config', 'systems': STATE.systems,
                          'ping_time': STATE.ping_time, 'max_missed': STATE.max_missed,
                          'ping_loss_warn': STATE.ping_loss_warn})
-    elif t in ('peer_connected', 'peer_disconnected'):
+    elif t in ('repeater_connected', 'repeater_disconnected'):
         # Granular repeater connect/disconnect delta. Apply it to the in-memory
         # systems view and re-broadcast the (enriched) config so the browser
         # renders it without waiting for the next full push. Ignored if the
@@ -267,9 +267,9 @@ async def handle_event(evt):
         if sysview is not None and sysview.get('MODE') == 'SERVER':
             reps = sysview.setdefault('REPEATERS', {})
             rid = str(evt.get('radio_id'))
-            if t == 'peer_connected' and evt.get('info') is not None:
+            if t == 'repeater_connected' and evt.get('info') is not None:
                 reps[rid] = evt['info']
-            elif t == 'peer_disconnected':
+            elif t == 'repeater_disconnected':
                 reps.pop(rid, None)
             STATE.systems = enrich_config(STATE.systems)
             await broadcast({'type': 'config', 'systems': STATE.systems,

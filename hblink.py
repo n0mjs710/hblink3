@@ -1014,14 +1014,16 @@ class ReportServer:
     def send_bridge_event(self, _data):
         pass  # Overridden by BridgeReportServer in bridge.py
 
-    # Granular peer lifecycle delta (a repeater logging in or dropping), so the
+    # Granular repeater lifecycle delta (a repeater logging in or dropping), so the
     # dashboard reflects changes immediately instead of waiting for the next full
     # config push. _info is a json_repeater() view on 'connected', omitted on
     # 'disconnected'.
     def send_peer(self, _system, _radio_id, _action, _info=None):
-        # Canonical vocabulary: 'peer_connected' / 'peer_disconnected' (the type
-        # carries the lifecycle; _action is 'connected'|'disconnected').
-        evt = {'type': 'peer_' + _action, 'system': _system, 'radio_id': _radio_id}
+        # Canonical vocabulary: 'repeater_connected' / 'repeater_disconnected' -- the
+        # entity here is a REPEATER everywhere else in hblink3 (REPEATERS dict,
+        # json_repeater, the UI) and in hblink4; the type carries the lifecycle,
+        # _action is 'connected'|'disconnected'. (dmrlink3 emits peer_* -- IPSC peers.)
+        evt = {'type': 'repeater_' + _action, 'system': _system, 'radio_id': _radio_id}
         if _info is not None:
             evt['info'] = _info
         self._send_json(evt)
