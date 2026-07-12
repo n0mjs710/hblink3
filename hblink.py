@@ -224,6 +224,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
         # Define shortcuts and generic function names based on the type of system we are
         if self._config['MODE'] == 'SERVER':
             self._repeaters = self._CONFIG['SYSTEMS'][self._system]['REPEATERS']
+            self._reported_peers = set()   # peer ids last reported 'connected' to the dashboard
             self.send_system = self.send_repeaters
             self.maintenance_loop = self.server_maintenance_loop
             self.datagram_received = self.server_datagram_received
@@ -262,6 +263,22 @@ class HBSYSTEM(asyncio.DatagramProtocol):
             logger.info('(%s) Repeater %s (%s) has timed out and is being removed', self._system, self._repeaters[repeater]['CALLSIGN'], self._repeaters[repeater]['RADIO_ID'])
             # Remove any timed out repeaters from the configuration
             del self._CONFIG['SYSTEMS'][self._system]['REPEATERS'][repeater]
+        self.report_peer_deltas()
+
+    # Emit granular 'peer' connected/disconnected events for any change since the
+    # last sweep. Centralized reconciliation (diff of currently-connected peers
+    # vs last reported) so it can't miss any of the scattered add/remove paths and
+    # only emits on actual change -- never a full-state flood.
+    def report_peer_deltas(self):
+        if not self._report:
+            return
+        current = {pid for pid, r in self._repeaters.items() if r.get('CONNECTION') == 'YES'}
+        for pid in current - self._reported_peers:
+            self._report.send_peer(self._system, int_id(pid), 'connected',
+                                   json_repeater(pid, self._repeaters[pid]))
+        for pid in self._reported_peers - current:
+            self._report.send_peer(self._system, int_id(pid), 'disconnected')
+        self._reported_peers = current
 
     # Aliased in __init__ to maintenance_loop if system is an outbound client
     def outbound_maintenance_loop(self):
@@ -491,6 +508,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
                     self.send_repeater(_peer_id, b''.join([RPTACK, _peer_id]))
                     logger.info('(%s) Repeater %s (%s) has sent repeater configuration', self._system, _this_repeater['CALLSIGN'], _this_repeater['RADIO_ID'])
+                    self.report_peer_deltas()   # report the new peer immediately, not at the next sweep
                 else:
                     self.transport.sendto(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     logger.warning('(%s) Repeater info from Radio ID that has not logged in: %s', self._system, int_id(_peer_id))
@@ -709,13 +727,34 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 # then a live stream of incremental events.
 
 
+# Decode a bytes config field to a stripped str; pass through non-bytes.
+def _s(_v):
+    return _v.decode('utf-8', errors='ignore').strip() if isinstance(_v, (bytes, bytearray)) else _v
+
+
+# JSON-serializable view of a single connected repeater. Shared by the full
+# config snapshot and the granular 'peer' event so both carry identical fields.
+def json_repeater(_pid, _p):
+    return {
+        'RADIO_ID':   int_id(_pid),
+        'CALLSIGN':   _s(_p.get('CALLSIGN', '')),
+        'LOCATION':   _s(_p.get('LOCATION', '')),
+        'IP':         _p.get('IP', ''),
+        'PORT':       _p.get('PORT', ''),
+        'CONNECTED':  _p.get('CONNECTED', 0),
+        'CONNECTION': _p.get('CONNECTION', ''),
+        'LAST_PING':  _p.get('LAST_PING', 0),
+        'RX_FREQ':    _s(_p.get('RX_FREQ', '')),
+        'TX_FREQ':    _s(_p.get('TX_FREQ', '')),
+        'SLOTS':      _s(_p.get('SLOTS', '')),
+    }
+
+
 # Build a JSON-serializable view of the SYSTEMS config for consumers. Bytes
 # fields are decoded and DMR IDs converted to integers; secrets (passphrases) and
 # internal ACL structures are intentionally omitted.
 def json_systems(_systems):
-    def s(_v):
-        return _v.decode('utf-8', errors='ignore').strip() if isinstance(_v, (bytes, bytearray)) else _v
-
+    s = _s
     out = {}
     for name, c in _systems.items():
         mode = c['MODE']
@@ -726,19 +765,7 @@ def json_systems(_systems):
             view['GROUP_HANGTIME'] = c.get('GROUP_HANGTIME', 0)
             repeaters = {}
             for pid, p in c['REPEATERS'].items():
-                repeaters[str(int_id(pid))] = {
-                    'RADIO_ID':   int_id(pid),
-                    'CALLSIGN':   s(p.get('CALLSIGN', '')),
-                    'LOCATION':   s(p.get('LOCATION', '')),
-                    'IP':         p.get('IP', ''),
-                    'PORT':       p.get('PORT', ''),
-                    'CONNECTED':  p.get('CONNECTED', 0),
-                    'CONNECTION': p.get('CONNECTION', ''),
-                    'LAST_PING':  p.get('LAST_PING', 0),
-                    'RX_FREQ':    s(p.get('RX_FREQ', '')),
-                    'TX_FREQ':    s(p.get('TX_FREQ', '')),
-                    'SLOTS':      s(p.get('SLOTS', '')),
-                }
+                repeaters[str(int_id(pid))] = json_repeater(pid, p)
             view['REPEATERS'] = repeaters
         elif mode == 'OUTBOUND':
             stats = c.get('STATS', {})
@@ -889,6 +916,16 @@ class ReportServer:
 
     def send_bridge_event(self, _data):
         pass  # Overridden by BridgeReportServer in bridge.py
+
+    # Granular peer lifecycle delta (a repeater logging in or dropping), so the
+    # dashboard reflects changes immediately instead of waiting for the next full
+    # config push. _info is a json_repeater() view on 'connected', omitted on
+    # 'disconnected'.
+    def send_peer(self, _system, _radio_id, _action, _info=None):
+        evt = {'type': 'peer', 'system': _system, 'radio_id': _radio_id, 'action': _action}
+        if _info is not None:
+            evt['info'] = _info
+        self._send_json(evt)
 
     def periodic_push(self):
         self.send_config()

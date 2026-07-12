@@ -101,6 +101,58 @@ class TestServerHandshake(unittest.TestCase):
         self.assertEqual(m.transport.sent[-1][0][:6], MSTNAK)
 
 
+class TestPeerEvents(unittest.TestCase):
+    """The reconciliation sweep emits granular 'peer' connected/disconnected
+    events so the dashboard reflects repeater changes without the full push."""
+
+    def _server(self):
+        captured = []
+
+        class Rep:
+            def send_peer(self, system, radio_id, action, info=None):
+                captured.append((system, radio_id, action, info))
+
+        srv = hblink.HBSYSTEM('SERVER-1', CFG, Rep())
+        srv.transport = MockDatagramTransport()
+        return srv, captured
+
+    def _login(self, srv, radio_id=312000):
+        pid = bytes_4(radio_id)
+        addr = ('127.0.0.1', 50000)
+        passphrase = CFG['SYSTEMS']['SERVER-1']['PASSPHRASE']
+        srv.datagram_received(RPTL + pid, addr)
+        salt = bytes_4(srv._repeaters[pid]['SALT'])
+        calc = bhex(sha256(salt + passphrase).hexdigest())
+        srv.datagram_received(RPTK + pid + calc, addr)
+        srv.datagram_received(RPTC + pid + b'TEST    ' + b'\x00' * 300, addr)
+        return pid
+
+    def test_connected_event_on_login(self):
+        srv, cap = self._server()
+        self._login(srv)
+        conn = [c for c in cap if c[2] == 'connected']
+        self.assertEqual(len(conn), 1)
+        self.assertEqual(conn[0][0], 'SERVER-1')      # system
+        self.assertEqual(conn[0][1], 312000)          # radio_id
+        self.assertIsNotNone(conn[0][3])              # info payload present
+        self.assertEqual(conn[0][3]['RADIO_ID'], 312000)
+
+    def test_no_duplicate_connected_event(self):
+        srv, cap = self._server()
+        self._login(srv)
+        srv.report_peer_deltas()                      # a later sweep, nothing changed
+        self.assertEqual(len([c for c in cap if c[2] == 'connected']), 1)
+
+    def test_disconnected_event_on_timeout(self):
+        srv, cap = self._server()
+        pid = self._login(srv)
+        srv._repeaters[pid]['LAST_PING'] = 0          # force the ping timeout
+        srv.server_maintenance_loop()
+        disc = [c for c in cap if c[2] == 'disconnected']
+        self.assertEqual(len(disc), 1)
+        self.assertEqual(disc[0][1], 312000)
+
+
 class MockWriteTransport:
     """Mimics enough of an asyncio Transport for ReportServer._send_json."""
     def __init__(self, buffer_size=0):
