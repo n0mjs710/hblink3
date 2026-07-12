@@ -7,13 +7,17 @@
 #
 # Run from the repo root:   venv/bin/python -m unittest discover -s tests
 
+import copy
 import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, 'tools'))
 
 import bridge
+import migrate_obp_rules
 
 
 def _member(system, ts, tgid):
@@ -101,6 +105,74 @@ class TestExpandOBPBridges(unittest.TestCase):
             })
         self.assertTrue(any('renumbers TGID' in line for line in cm.output))
         self.assertEqual(len(bridges['KS-STATEWIDE']), 2)      # both still added
+
+
+class TestMigrateOBPRules(unittest.TestCase):
+    """The migration tool (tools/migrate_obp_rules.py) must move inline OBP members
+    into OBP_BRIDGES while preserving the exact routing."""
+
+    OBP_SYSTEMS = {'VESTA_OBP', 'CC_OBP'}
+
+    def setUp(self):
+        bridge.CONFIG = {'SYSTEMS': {
+            'VESTA_OBP': {'MODE': 'OPENBRIDGE'},
+            'CC_OBP':    {'MODE': 'OPENBRIDGE'},
+            'REPEATERS': {'MODE': 'SERVER'},
+            'IPSC':      {'MODE': 'SERVER'},
+        }}
+
+    def _old_bridges(self):
+        # Old inline form: OBP systems mixed in as ordinary members.
+        return {
+            'B2':  [_member('REPEATERS', 1, 2), _member('IPSC', 1, 2), _member('VESTA_OBP', 1, 2)],
+            'B9':  [_member('REPEATERS', 1, 9), _member('VESTA_OBP', 1, 9), _member('CC_OBP', 1, 9)],
+            'B8':  [_member('CC_OBP', 1, 8)],                       # OBP-only -> should drop from BRIDGES
+            'BSW': [_member('REPEATERS', 2, 3120), _member('VESTA_OBP', 1, 3120)],
+        }
+
+    def _routing_projection(self, bridges, obp_bridges=None):
+        # {(system, ts, tgid_bytes): sorted[bridge names]} -- identity-independent.
+        # obp_bridges=None => old inline path (no expand); a dict => new expanded path.
+        b = copy.deepcopy(bridges)
+        if obp_bridges is not None:
+            b = bridge.expand_obp_bridges(b, obp_bridges)
+        src, _ = bridge.index_bridges(bridge.make_bridges(b))
+        return {k: sorted(hit[0] for hit in v) for k, v in src.items()}
+
+    def test_roundtrip_preserves_routing(self):
+        old = self._old_bridges()
+        # OLD routing: inline OBP members, no OBP_BRIDGES table.
+        want = self._routing_projection(old)
+
+        new_bridges, obp_bridges, moved, errors, warnings = migrate_obp_rules.migrate(
+            copy.deepcopy(old), self.OBP_SYSTEMS)
+        self.assertFalse(errors)
+        # NEW routing: trimmed BRIDGES + expanded OBP_BRIDGES.
+        got = self._routing_projection(new_bridges, obp_bridges)
+        self.assertEqual(got, want)
+
+    def test_moves_and_drops_obp_only_bridge(self):
+        new_bridges, obp_bridges, moved, errors, warnings = migrate_obp_rules.migrate(
+            copy.deepcopy(self._old_bridges()), self.OBP_SYSTEMS)
+        self.assertEqual(len(moved), 5)                         # VESTA_OBP x3 + CC_OBP x2
+        self.assertNotIn('B8', new_bridges)                    # OBP-only bridge dropped from BRIDGES
+        self.assertEqual(obp_bridges['CC_OBP']['B8'], 8)       # but present in the table
+        self.assertEqual(obp_bridges['VESTA_OBP']['B2'], 2)
+
+    def test_ts_override_becomes_tuple(self):
+        old = {'BSW': [_member('VESTA_OBP', 2, 3120)]}          # TS 2 (non-default)
+        _, obp_bridges, _, _, _ = migrate_obp_rules.migrate(old, {'VESTA_OBP'})
+        self.assertEqual(obp_bridges['VESTA_OBP']['BSW'], (3120, 2))
+
+    def test_detects_ingress_fork(self):
+        old = {'B1': [_member('VESTA_OBP', 1, 2)], 'B2': [_member('VESTA_OBP', 1, 2)]}
+        _, _, _, errors, _ = migrate_obp_rules.migrate(old, {'VESTA_OBP'})
+        self.assertTrue(errors)
+
+    def test_detects_renumber(self):
+        old = {'BSW': [_member('VESTA_OBP', 1, 3120), _member('CC_OBP', 1, 8)]}
+        _, _, _, _, warnings = migrate_obp_rules.migrate(old, {'VESTA_OBP', 'CC_OBP'})
+        self.assertTrue(warnings)
 
 
 if __name__ == '__main__':
