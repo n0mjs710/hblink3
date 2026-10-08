@@ -5,23 +5,26 @@ baseline of the current state rather than enumerating the project's full history
 
 ## [Unreleased]
 
-### OpenBridge both-slots extension removed for group traffic — **breaking**
+### OpenBridge both-slots extension removed — **breaking**
 - Group calls on an OpenBridge are **TS1 on the wire by protocol**. The local
   `BOTH_SLOTS` extension that admitted group frames on TS2 is gone: only the receive
   half was ever implemented (group egress has always forced the slot bit to 0), so no
   HBlink3 ever originated TS2 group traffic, and an admitted TS2 frame was discarded
   silently in routing. A group frame on TS2 is now **rejected at ingress with a log
   line** instead of being accepted and dropped without one.
-- `BOTH_SLOTS` is **retained** and now governs **unit (private) calls only**, where it
-  still preserves a call's timeslot across the link. No configuration change is
-  required; the setting simply no longer affects group traffic.
+- Unit (private) calls are TS1 on a trunk too, and the **`BOTH_SLOTS` setting is gone
+  entirely** — removed from `hblink.cfg` parsing, so an existing key is simply ignored
+  and the line can be deleted at your convenience. Unit egress now forces TS1
+  unconditionally, and unit frames on TS2 are rejected at ingress alongside group
+  frames. The whole slot check is back to what it was before the extension: all
+  OpenBridge traffic is Slot 1.
 - A `(TGID, TS)` row in `OBP_BRIDGES` is now a **startup ERROR** (TS is injected as
   `1`). Left in place, the field could only disagree with the wire and make the row
   unmatchable, taking a talkgroup off the air with no diagnostic. **Local** timeslot
   assignment is unchanged and lives where it always has: the `TS` on the bridge's
   `REPEATER`/`SERVER` member in `BRIDGES`, which `bridge.py` flips the slot bit to
   match. `tools/migrate_obp_rules.py` drops a moved member's TS with a WARNING.
-- `hblink-SAMPLE.cfg` now ships `BOTH_SLOTS: False`, matching the documented advice.
+- `hblink-SAMPLE.cfg` no longer ships a `BOTH_SLOTS` line.
 
 ## [3.0.0] — 2026-07-12
 

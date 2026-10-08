@@ -166,6 +166,10 @@ HBlink masquerades as a repeater/hotspot and dials out to another Server. Most f
 
 OpenBridge is a Server-to-Server (both ends equal), always-TS1 link authenticated by a shared HMAC key and the source socket — no login/registration handshake.
 
+**All** OpenBridge traffic is on TS1, group and private calls alike; a frame arriving on TS2 is rejected. See *Timeslots on a trunk* under [`OBP_BRIDGES`](#obp_bridges) for why, and for where local timeslot assignment lives instead.
+
+> **Removed setting — `BOTH_SLOTS`.** Earlier versions accepted a `BOTH_SLOTS` key here, a local extension that allowed TS2 traffic on a trunk. It is gone, and the key is now ignored if present — you can delete the line. It only ever worked on ingress (egress always forced TS1), so nothing it claimed to enable was functional end to end. If you used it hoping to land a talkgroup on local TS2, that is configured in `rules.py` and always was: see *Timeslots on a trunk*.
+
 | Field | Meaning |
 |---|---|
 | `ENABLED` | `False` ⇒ skipped. |
@@ -174,7 +178,6 @@ OpenBridge is a Server-to-Server (both ends equal), always-TS1 link authenticate
 | `PASSPHRASE` | Shared HMAC-SHA1 key. **Must match exactly on both ends** — this plus the source socket *is* the authentication. |
 | `NETWORK_ID` | A DMR-ID-shaped number identifying this server. By convention it is stamped into every outgoing frame's "Repeater ID" field. |
 | `PRESERVE_SOURCE_PEER` | `True` forwards the **originating** peer ID in that Repeater-ID field instead of overwriting it with `NETWORK_ID`. The field is unvalidated (auth is the HMAC + source socket) and used only for logging/reporting, so this simply preserves a call's true source across the link. Default `False` (spec-conventional). Most useful when **both** ends enable it. |
-| `BOTH_SLOTS` | **Unit (private) calls only.** `True` preserves a unit call's timeslot across the link instead of forcing it to TS1. It has no effect on group traffic: group calls are TS1 on the wire by protocol, and a group frame arriving on TS2 is rejected at ingress whatever this is set to. **🛑 Only HBlink is known to accept both-slots unit calls. No other OpenBridge server (BrandMeister, DMR+, etc.) does — set `True` only on HBlink-to-HBlink links, and leave it `False` everywhere else.** |
 | `USE_ACL` / `SUB_ACL` | This link's subscriber ACL. |
 | `TGID_ACL` | Talkgroup ACL (TS1 only — note the single-slot name, unlike the `SERVER`/`OUTBOUND` `TGID_TS1_ACL`/`TGID_TS2_ACL`). |
 
@@ -246,9 +249,9 @@ Read one row as **"on this OpenBridge, this TGID *is* this bridge."** That singl
 #### Timeslots on a trunk
 
 There is no timeslot column here, and that is deliberate. OpenBridge group traffic
-is **TS1 on the wire by protocol**: a trunk multiplexes concurrent calls by stream
-id rather than by slot, so the slot bit carries no information and every known
-implementation forces it to 1 on transmit. HBlink4, for one, forces TS1 outbound and
+is **TS1 on the wire by protocol** (as is all other OpenBridge traffic): a trunk
+multiplexes concurrent calls by stream id rather than by slot, so the slot bit
+carries no information and every known implementation forces it to 1 on transmit. HBlink4, for one, forces TS1 outbound and
 ignores the received slot bit entirely on the way in.
 
 Which local timeslot a talkgroup lands on is therefore decided by the **receiver**,

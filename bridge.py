@@ -566,8 +566,9 @@ class routerOBP(OPENBRIDGE):
 
 
     # Forward a bridged unit (private) call INTO this OpenBridge (this system is
-    # the target). Unit calls are not TGID/LC rewritten; the slot bit is cleared
-    # unless BOTH_SLOTS is set, and there is no BER/RSSI trailer.
+    # the target). Unit calls are not TGID/LC rewritten; the slot bit is forced to
+    # TS1 (OpenBridge carries all traffic on TS1, group and unit alike), and there
+    # is no BER/RSSI trailer.
     def bridge_unit(self, _src, _peer_id, _rf_src, _dst_id, _stream_id, _slot,
                     _frame_type, _dtype_vseq, _data, _pkt_time):
         _bits = _data[15]
@@ -582,17 +583,14 @@ class routerOBP(OPENBRIDGE):
                 'DST':       _dst_id,
                 'ACTIVE':    True
             }
-            logger.info('(%s) Unit call bridged to OBP System: %s TS: %s, UNIT: %s', _src._system, self._system, _slot if self._config['BOTH_SLOTS'] else 1, int_id(_dst_id))
+            logger.info('(%s) Unit call bridged to OBP System: %s TS: %s, UNIT: %s', _src._system, self._system, 1, int_id(_dst_id))
             if CONFIG['REPORTS']['REPORT']:
-                self._report.send_bridge_event('UNIT VOICE,START,TX,{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id)).encode(encoding='utf-8', errors='ignore'))
+                self._report.send_bridge_event('UNIT VOICE,START,TX,{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), 1, int_id(_dst_id)).encode(encoding='utf-8', errors='ignore'))
 
         # Record the time of this packet so we can later identify a stale stream
         _target_status[_stream_id]['LAST'] = _pkt_time
-        # Clear the TS bit and follow proper OBP definition, unless BOTH_SLOTS is set
-        if self._config['BOTH_SLOTS']:
-            _tmp_bits = _bits
-        else:
-            _tmp_bits = _bits & ~(1 << 7)
+        # Force the TS bit to 0 -- OpenBridge carries all traffic on TS1 by protocol.
+        _tmp_bits = _bits & ~(1 << 7)
         _out = b''.join([_data[:15], _tmp_bits.to_bytes(1, 'big'), _data[16:20], _dmrpkt])
         if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM):
             _target_status[_stream_id]['ACTIVE'] = False

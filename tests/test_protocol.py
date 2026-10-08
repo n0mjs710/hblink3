@@ -338,9 +338,8 @@ class TestBridgeStreamEvents(unittest.TestCase):
 
 
 class TestOpenBridgeSlotAdmission(unittest.TestCase):
-    """OpenBridge group traffic is TS1 on the wire by protocol: a group frame on
-    TS2 is rejected at ingress, and BOTH_SLOTS does not change that. BOTH_SLOTS
-    governs unit calls only (their slot is carried through end to end).
+    """OpenBridge carries all traffic on TS1 by protocol -- group and unit alike.
+    A frame arriving on TS2 is rejected at ingress; nothing admits it.
 
     Driven through datagram_received -- the routing harness calls dmrd_received
     directly and so bypasses this admission check.
@@ -359,45 +358,31 @@ class TestOpenBridgeSlotAdmission(unittest.TestCase):
         from hmac import new as hmac_new
         return data + hmac_new(self.PASSPHRASE, data, sha1).digest()
 
-    def _obp(self, name):
+    def _obp(self):
         """An OPENBRIDGE whose dmrd_received only records that it was reached."""
-        obp = hblink.OPENBRIDGE(name, CFG, None)
+        obp = hblink.OPENBRIDGE('OBP-1', CFG, None)
         seen = []
         obp.dmrd_received = lambda *a, **kw: seen.append(a)
-        return obp, seen, CFG['SYSTEMS'][name]['TARGET_SOCK']
+        return obp, seen, CFG['SYSTEMS']['OBP-1']['TARGET_SOCK']
 
-    def test_group_ts2_rejected_when_both_slots_false(self):
-        obp, seen, sock = self._obp('OBP-1')
-        obp.datagram_received(self._frame(slot=2, unit=False), sock)
-        self.assertEqual(seen, [])
+    def test_ts2_rejected(self):
+        # The regression these tests exist for: a BOTH_SLOTS setting used to admit
+        # TS2 here -- group traffic that routing then discarded silently (OBP rows
+        # are TS1), and unit traffic whose slot no peer would honor.
+        for call in ('group', 'unit'):
+            with self.subTest(call_type=call):
+                obp, seen, sock = self._obp()
+                obp.datagram_received(self._frame(slot=2, unit=(call == 'unit')), sock)
+                self.assertEqual(seen, [])
 
-    def test_group_ts2_rejected_even_when_both_slots_true(self):
-        # The regression this test exists for: BOTH_SLOTS used to admit this frame,
-        # which routing then discarded silently because OBP rows are TS1.
-        obp, seen, sock = self._obp('OBP-BS')
-        self.assertTrue(CFG['SYSTEMS']['OBP-BS']['BOTH_SLOTS'])
-        obp.datagram_received(self._frame(slot=2, unit=False), sock)
-        self.assertEqual(seen, [])
-
-    def test_group_ts1_accepted(self):
-        for name in ('OBP-1', 'OBP-BS'):
-            with self.subTest(system=name):
-                obp, seen, sock = self._obp(name)
-                obp.datagram_received(self._frame(slot=1, unit=False), sock)
+    def test_ts1_accepted(self):
+        for call in ('group', 'unit'):
+            with self.subTest(call_type=call):
+                obp, seen, sock = self._obp()
+                obp.datagram_received(self._frame(slot=1, unit=(call == 'unit')), sock)
                 self.assertEqual(len(seen), 1)
-                self.assertEqual(seen[0][4], 1)          # _slot
-                self.assertEqual(seen[0][5], 'group')    # _call_type
-
-    def test_unit_ts2_still_accepted_regardless_of_both_slots(self):
-        # Unit calls are exempt from the slot-1 check on ingress, with or without
-        # the flag; BOTH_SLOTS decides only whether egress preserves the slot.
-        for name in ('OBP-1', 'OBP-BS'):
-            with self.subTest(system=name):
-                obp, seen, sock = self._obp(name)
-                obp.datagram_received(self._frame(slot=2, unit=True), sock)
-                self.assertEqual(len(seen), 1)
-                self.assertEqual(seen[0][4], 2)          # _slot carried through
-                self.assertEqual(seen[0][5], 'unit')
+                self.assertEqual(seen[0][4], 1)       # _slot
+                self.assertEqual(seen[0][5], call)    # _call_type
 
 
 class TestTransportSend(unittest.TestCase):
