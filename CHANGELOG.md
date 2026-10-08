@@ -6,6 +6,31 @@ baseline of the current state rather than enumerating the project's full history
 ## [Unreleased]
 
 ### OpenBridge both-slots extension removed — **breaking**
+
+HBlink3 carried a local extension to OpenBridge (`BOTH_SLOTS`) that allowed traffic on
+TS2, against the protocol's all-traffic-on-TS1 convention. It is gone, and the reason
+is simply that **it gained no capability and created ways to cause problems.**
+
+- **No capability gained.** A trunk multiplexes concurrent calls by stream id, not by
+  timeslot, so a second slot adds no concurrency — HBlink3 keeps OpenBridge stream
+  state keyed by stream id, with no slot dimension to relieve. And the one thing a
+  slot could usefully express — *which local timeslot a talkgroup lands on* — was
+  never the wire's job in the first place: the receiver decides that from the TGID,
+  and in HBlink3 it already does, via the `TS` on a bridge's `REPEATER`/`SERVER`
+  member. That path is untouched and always worked.
+- **Problems created.** Only the receive half was ever implemented, so the extension
+  was never functional end to end — a TS2 group frame was admitted and then discarded
+  *silently* in routing. The global `TGID_TS1_ACL` is gated on slot 1, so an admitted
+  TS2 frame also skipped it. The `(TGID, TS)` knob in `OBP_BRIDGES` could only make a
+  row unmatchable, taking a talkgroup off the air with no diagnostic. And the
+  documentation had drifted into describing the resulting gap as intent.
+- **Nothing else implements it.** TS1 is forced on transmit by every known
+  implementation — BrandMeister, DMR+, DMR Gateway, and HBlink4, which additionally
+  *ignores* the received slot bit and derives local timeslot from its own per-OBP
+  `talkgroup_slots` map. So the extension had no counterparty either.
+
+Mechanics of the change:
+
 - Group calls on an OpenBridge are **TS1 on the wire by protocol**. The local
   `BOTH_SLOTS` extension that admitted group frames on TS2 is gone: only the receive
   half was ever implemented (group egress has always forced the slot bit to 0), so no
