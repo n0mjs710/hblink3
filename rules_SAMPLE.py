@@ -43,20 +43,31 @@ Read a row as "on THIS OpenBridge, this TGID *is* this bridge." That one fact is
 the route in BOTH directions and the filter: a TGID not listed for an OBP is
 dropped (fail-closed). At startup bridge.py expands each row into a bridge member
 for you. Notes:
-    * TS defaults to 1 (OBP "no timeslot" placeholder). To override: (TGID, TS).
+    * There is no TS column, and that is deliberate -- see below.
     * The OBP system name must be an enabled MODE: OPENBRIDGE system in hblink.cfg.
     * Leaving an OBP system as an inline BRIDGES member above is a startup ERROR.
     * On one OBP, a TGID may map to only one bridge (a fork duplicates the stream)
       -> startup ERROR. A bridge carrying different TGIDs on two OBPs (renumber in
       transit) is allowed but logs a WARNING.
     * OBP_BRIDGES is optional -- omit it or leave it {} if you run no OpenBridges.
+
+No timeslot is configurable here. OpenBridge group traffic is TS1 on the wire by
+protocol -- the slot bit is a convention on a trunk that multiplexes streams by
+stream-id, so it carries no meaning and every known implementation forces it to 1.
+Which local timeslot a talkgroup lands on is decided by the RECEIVER, from the TGID.
+In HBlink3 that decision is the TS on the bridge's REPEATER/SERVER member in BRIDGES
+above, and bridge.py flips the slot bit to match on the way out -- so "TGID 3129
+arrives over the trunk and lands on TS2 locally" is written as TS 2 on that member,
+with the OBP row naming the TGID alone. A TS on an OBP row could only ever disagree
+with the wire and make the row unmatchable, silently taking a talkgroup off the air,
+so it is rejected at startup.
 '''
 
 OBP_BRIDGES = {
     # 'BACKBONE-OBP': {
     #     'WORLDWIDE': 1,
     #     'STATEWIDE': 3129,
-    #     'ENGLISH':   (13, 2),    # TGID 13 pinned to TS 2 (override)
+    #     'ENGLISH':   13,
     # },
 }
 

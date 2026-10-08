@@ -5,7 +5,7 @@
 # HBlink3 no longer configures OpenBridge (MODE: OPENBRIDGE) systems as inline
 # BRIDGES members. They now live in a per-OBP table:
 #
-#     OBP_BRIDGES = { <obp system> : { <bridge name> : <TGID> } }   # TS 1, or (TGID, TS)
+#     OBP_BRIDGES = { <obp system> : { <bridge name> : <TGID> } }
 #
 # This tool reads your existing hblink.cfg (to learn which systems are OPENBRIDGE)
 # and your existing rules.py (old inline form), then:
@@ -14,6 +14,10 @@
 #   * flags the two problems the new loader would reject/warn on
 #       - a TGID mapped to >1 bridge on one OBP (ingress fork)  -> ERROR
 #       - a bridge with different TGIDs across OBPs (renumber)   -> WARNING
+#   * drops any TS on a moved OBP member (with a WARNING). OpenBridge group traffic
+#     is TS1 on the wire by protocol, so a TS2 inline OBP member never put TS2 on
+#     the wire; the new table takes the TGID alone. Local timeslot assignment lives
+#     on the bridge's REPEATER/SERVER member, which is left untouched.
 #   * prints a summary of what moved, and writes a new rules file.
 #
 # It never overwrites your rules.py: output goes to a separate file you review
@@ -65,7 +69,7 @@ def _fmt_member(m):
 def migrate(bridges, obp_systems):
     """Return (new_bridges, obp_bridges, moved, errors, warnings)."""
     new_bridges = {}
-    obp_bridges = {}                 # obp -> {bridge: tgid_or_(tgid, ts)}
+    obp_bridges = {}                 # obp -> {bridge: tgid}
     moved = []                       # (obp, bridge, tgid, ts)
     errors = []
     warnings = []
@@ -83,7 +87,13 @@ def migrate(bridges, obp_systems):
                                   'ingress fork; keep only one before starting HBlink3'
                                   .format(m['SYSTEM'], tgid, tgid_to_bridge[key], bridge_name))
                 tgid_to_bridge[key] = bridge_name
-                obp_bridges.setdefault(m['SYSTEM'], {})[bridge_name] = tgid if ts == 1 else (tgid, ts)
+                if ts != 1:
+                    warnings.append('OBP "{}" member of bridge "{}" was on timeslot {}; dropped. '
+                                    'OpenBridge group traffic is TS1 on the wire by protocol, so '
+                                    'this never took effect on egress. To land TGID {} on local '
+                                    'TS{}, set TS on that bridge\'s REPEATER/SERVER member.'
+                                    .format(m['SYSTEM'], bridge_name, ts, tgid, ts))
+                obp_bridges.setdefault(m['SYSTEM'], {})[bridge_name] = tgid
                 bridge_obp_tgid.setdefault(bridge_name, {})[m['SYSTEM']] = tgid
                 moved.append((m['SYSTEM'], bridge_name, tgid, ts))
             else:
@@ -148,7 +158,8 @@ def main():
     print('OpenBridge systems found in {}: {}'.format(args.config, ', '.join(sorted(obp_systems)) or '(none)'))
     print('\n{} inline OBP member(s) moved into OBP_BRIDGES:'.format(len(moved)))
     for obp, bridge_name, tgid, ts in moved:
-        print('  {:<12} {:<14} TGID {}{}'.format(obp, bridge_name, tgid, '' if ts == 1 else ' (TS {})'.format(ts)))
+        print('  {:<12} {:<14} TGID {}{}'.format(obp, bridge_name, tgid,
+              '' if ts == 1 else ' (was TS {} -- dropped, see WARNING)'.format(ts)))
     dropped = [b for b in bridges if b not in new_bridges]
     if dropped:
         print('\nBridges now defined only via OBP_BRIDGES (dropped from BRIDGES): {}'.format(', '.join(dropped)))

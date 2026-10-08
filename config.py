@@ -277,7 +277,6 @@ def build_config(_config_file):
                         'TARGET_SOCK': ( getaddrinfo(config.get(section, 'TARGET_IP'), 0)[0][4][0], config.getint(section, 'TARGET_PORT') ),
                         'TARGET_IP': getaddrinfo(config.get(section, 'TARGET_IP'), 0)[0][4][0],
                         'TARGET_PORT': config.getint(section, 'TARGET_PORT'),
-                        'BOTH_SLOTS': config.getboolean(section, 'BOTH_SLOTS'),
                         'PRESERVE_SOURCE_PEER': config.getboolean(section, 'PRESERVE_SOURCE_PEER', fallback=False),
                         'USE_ACL': config.getboolean(section, 'USE_ACL'),
                         'SUB_ACL': config.get(section, 'SUB_ACL'),

@@ -111,7 +111,8 @@ refused.
 ### OpenBridge special case
 
 OpenBridge systems do not register (no `REG_ACL`), and **all OpenBridge traffic
-is carried on Timeslot 1**. That means the **global `TGID_TS1_ACL`** is your
+is carried on Timeslot 1** — group and private calls alike; a frame arriving on
+TS2 is rejected at ingress. That means the **global `TGID_TS1_ACL`** is your
 talkgroup filter for OpenBridge peers. TS2 is forced to `PERMIT:ALL` internally
 for OpenBridge systems.
 

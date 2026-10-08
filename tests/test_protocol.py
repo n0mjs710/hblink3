@@ -337,6 +337,54 @@ class TestBridgeStreamEvents(unittest.TestCase):
         self.assertEqual(cap[0]['duration'], 4.20)
 
 
+class TestOpenBridgeSlotAdmission(unittest.TestCase):
+    """OpenBridge carries all traffic on TS1 by protocol -- group and unit alike.
+    A frame arriving on TS2 is rejected at ingress; nothing admits it.
+
+    Driven through datagram_received -- the routing harness calls dmrd_received
+    directly and so bypasses this admission check.
+    """
+
+    PASSPHRASE = CFG['SYSTEMS']['OBP-1']['PASSPHRASE']
+
+    def _frame(self, *, slot, unit, stream_id=b'\x00\x00\x00\x01'):
+        # 53-byte DMRD: hdr(4) seq(1) rf_src(3) dst(3) peer(4) bits(1) sid(4) dmrpkt(33).
+        # bits: bit7 slot2, bit6 unit, bits5-4 frame type (2 = data sync), bits3-0 vseq.
+        bits = (0x80 if slot == 2 else 0) | (0x40 if unit else 0) | 0x20 | HBPF_SLT_VHEAD
+        data = b''.join([DMRD, b'\x00', bytes_3(312000), bytes_3(3100), bytes_4(3129100),
+                         bytes([bits]), stream_id, bytes(33)])
+        self.assertEqual(len(data), 53)
+        from hashlib import sha1
+        from hmac import new as hmac_new
+        return data + hmac_new(self.PASSPHRASE, data, sha1).digest()
+
+    def _obp(self):
+        """An OPENBRIDGE whose dmrd_received only records that it was reached."""
+        obp = hblink.OPENBRIDGE('OBP-1', CFG, None)
+        seen = []
+        obp.dmrd_received = lambda *a, **kw: seen.append(a)
+        return obp, seen, CFG['SYSTEMS']['OBP-1']['TARGET_SOCK']
+
+    def test_ts2_rejected(self):
+        # The regression these tests exist for: a BOTH_SLOTS setting used to admit
+        # TS2 here -- group traffic that routing then discarded silently (OBP rows
+        # are TS1), and unit traffic whose slot no peer would honor.
+        for call in ('group', 'unit'):
+            with self.subTest(call_type=call):
+                obp, seen, sock = self._obp()
+                obp.datagram_received(self._frame(slot=2, unit=(call == 'unit')), sock)
+                self.assertEqual(seen, [])
+
+    def test_ts1_accepted(self):
+        for call in ('group', 'unit'):
+            with self.subTest(call_type=call):
+                obp, seen, sock = self._obp()
+                obp.datagram_received(self._frame(slot=1, unit=(call == 'unit')), sock)
+                self.assertEqual(len(seen), 1)
+                self.assertEqual(seen[0][4], 1)       # _slot
+                self.assertEqual(seen[0][5], call)    # _call_type
+
+
 class TestTransportSend(unittest.TestCase):
     def test_openbridge_send_uses_sendto_to_target(self):
         obp = hblink.OPENBRIDGE('OBP-1', CFG, None)

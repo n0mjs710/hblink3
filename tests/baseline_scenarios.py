@@ -152,7 +152,8 @@ def unit_hbp_to_obp():
 
 
 def unit_hbp_to_obp_ts2():
-    # Unit on TS2 to an OBP (BOTH_SLOTS False) -> slot bit cleared on egress.
+    # Unit on TS2 (valid on an HBP source) to an OBP -> slot bit forced to TS1 on
+    # egress, since OpenBridge carries all traffic on TS1.
     w = harness.World({}, unit_systems=['SERVER-1'], extra_systems=['OBP-1'])
     w.seed_unit_map(bytes_3(2080), 'OBP-1')
     _full_unit_call(w, 'SERVER-1', rf_src=bytes_3(312000), dst=bytes_3(2080),

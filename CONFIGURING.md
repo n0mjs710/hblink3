@@ -166,6 +166,10 @@ HBlink masquerades as a repeater/hotspot and dials out to another Server. Most f
 
 OpenBridge is a Server-to-Server (both ends equal), always-TS1 link authenticated by a shared HMAC key and the source socket — no login/registration handshake.
 
+**All** OpenBridge traffic is on TS1, group and private calls alike; a frame arriving on TS2 is rejected. See *Timeslots on a trunk* under [`OBP_BRIDGES`](#obp_bridges) for why, and for where local timeslot assignment lives instead.
+
+> **Removed setting — `BOTH_SLOTS`.** Earlier versions accepted a `BOTH_SLOTS` key here, a local extension that allowed TS2 traffic on a trunk. It is gone, and the key is now ignored if present — you can delete the line. It only ever worked on ingress (egress always forced TS1), so nothing it claimed to enable was functional end to end. If you used it hoping to land a talkgroup on local TS2, that is configured in `rules.py` and always was: see *Timeslots on a trunk*.
+
 | Field | Meaning |
 |---|---|
 | `ENABLED` | `False` ⇒ skipped. |
@@ -174,7 +178,6 @@ OpenBridge is a Server-to-Server (both ends equal), always-TS1 link authenticate
 | `PASSPHRASE` | Shared HMAC-SHA1 key. **Must match exactly on both ends** — this plus the source socket *is* the authentication. |
 | `NETWORK_ID` | A DMR-ID-shaped number identifying this server. By convention it is stamped into every outgoing frame's "Repeater ID" field. |
 | `PRESERVE_SOURCE_PEER` | `True` forwards the **originating** peer ID in that Repeater-ID field instead of overwriting it with `NETWORK_ID`. The field is unvalidated (auth is the HMAC + source socket) and used only for logging/reporting, so this simply preserves a call's true source across the link. Default `False` (spec-conventional). Most useful when **both** ends enable it. |
-| `BOTH_SLOTS` | `True` lets unit (private) calls use both slots; group traffic is always TS1. **🛑 Only HBlink is known to accept this. No other OpenBridge server (BrandMeister, DMR+, etc.) accepts both-slots traffic — set `True` only on HBlink-to-HBlink links, and leave it `False` everywhere else.** |
 | `USE_ACL` / `SUB_ACL` | This link's subscriber ACL. |
 | `TGID_ACL` | Talkgroup ACL (TS1 only — note the single-slot name, unlike the `SERVER`/`OUTBOUND` `TGID_TS1_ACL`/`TGID_TS2_ACL`). |
 
@@ -226,7 +229,7 @@ OBP_BRIDGES = {
     'VESTA_OBP': {              # an OPENBRIDGE system from hblink.cfg
         'WORLDWIDE': 1,
         'STATEWIDE': 3129,
-        'ENGLISH':   (13, 2),  # optional (TGID, TS) form; TS defaults to 1 otherwise
+        'ENGLISH':   13,
     },
 }
 ```
@@ -235,13 +238,43 @@ Read one row as **"on this OpenBridge, this TGID *is* this bridge."** That singl
 
 | Rule | Behavior |
 |---|---|
-| TS | Defaults to `1` (OpenBridge's "no timeslot" placeholder). Override with the `(TGID, TS)` tuple form. |
+| TS | **Not configurable** — injected as `1`. A `(TGID, TS)` row is a **startup ERROR**. See *Timeslots on a trunk* below. |
 | Triggers | None — `TO_TYPE`/`TIMEOUT`/`ON`/`OFF` don't apply to a trunk and are omitted. |
 | OBP system left as an inline `BRIDGES` member | **Startup ERROR** (move it into `OBP_BRIDGES`). |
 | Same OBP maps one TGID → two bridges (**ingress fork**) | **Startup ERROR** — it would duplicate the stream. |
 | A bridge carrying **different** TGIDs on two OBPs (**renumber in transit**) | Allowed, logs a **WARNING** — usually a typo, occasionally intentional at a network boundary. |
 
 `OBP_BRIDGES` is optional — omit it (or leave it `{}`) if you run no OpenBridges.
+
+#### Timeslots on a trunk
+
+There is no timeslot column here, and that is deliberate. OpenBridge group traffic
+is **TS1 on the wire by protocol** (as is all other OpenBridge traffic): a trunk
+multiplexes concurrent calls by stream id rather than by slot, so the slot bit
+carries no information and every known implementation forces it to 1 on transmit. HBlink4, for one, forces TS1 outbound and
+ignores the received slot bit entirely on the way in.
+
+Which local timeslot a talkgroup lands on is therefore decided by the **receiver**,
+from the TGID — and in HBlink3 that decision is already expressed as the `TS` on the
+bridge's `REPEATER`/`SERVER` member in `BRIDGES`. `bridge.py` flips the slot bit to
+match on egress, so a talkgroup arriving over a trunk on wire TS1 can land on local
+TS2 with no trunk-side setting at all:
+
+```python
+BRIDGES = {
+    'STATEWIDE': [
+        {'SYSTEM': 'REPEATERS', 'TS': 2, 'TGID': 3129, 'ACTIVE': True, ...},   # <- lands on TS2
+    ],
+}
+OBP_BRIDGES = {
+    'VESTA_OBP': {'STATEWIDE': 3129},                                          # <- TGID only
+}
+```
+
+(This is the same thing HBlink4 does with its per-OBP `talkgroup_slots` map, written
+in HBlink3's vocabulary.) A `TS` on an OBP row could only ever disagree with the wire
+and make the row unmatchable — silently taking a talkgroup off the air with no
+diagnostic — which is why it is rejected at startup rather than ignored.
 
 ### Migrating from the old inline form
 
