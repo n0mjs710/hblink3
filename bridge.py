@@ -129,7 +129,7 @@ def make_bridges(_rules):
 
 
 # OBP systems are configured in a separate per-OBP table (OBP_BRIDGES in rules.py),
-# NOT as inline bridge members: {obp_system: {bridge_name: tgid_or_(tgid, ts)}}.
+# NOT as inline bridge members: {obp_system: {bridge_name: tgid}}.
 # Each row means "on THIS OpenBridge, this TGID *is* this bridge" -- the route in
 # both directions and, because an unmapped TGID is never a routing key, the
 # fail-closed filter too. We expand each row into an ordinary synthetic bridge
@@ -137,6 +137,14 @@ def make_bridges(_rules):
 # Triggers (TO_TYPE/TIMEOUT/ON/OFF) are meaningless for a trunk -- there is no RF
 # user to key them up -- so they are hard-wired inert and a TGID-heavy trunk costs
 # no rule-timer work. Runs before make_bridges() (operates on raw int TGIDs).
+#
+# TS is not configurable here: it is injected as 1, because OpenBridge group traffic
+# is TS1 on the wire by protocol (see OPENBRIDGE.bridge_group). The slot bit is a
+# convention on a stream-multiplexed trunk, so it is the *receiver* that decides
+# which local timeslot a talkgroup lands on, from the TGID -- here that is the TS on
+# the bridge's HBP member, which bridge_group() flips the bit to match. A TS on an
+# OBP row could therefore only ever disagree with the wire and make the row
+# unmatchable, silently taking a talkgroup off the air, so it is rejected outright.
 #
 # Validation at load (design spec §3.3/§3.5):
 #   * intra-OBP 1:1 -- a TGID mapped to >1 bridge on one OBP (ingress fork) is a hard
@@ -165,7 +173,13 @@ def expand_obp_bridges(_bridges, _obp_bridges):
             sys.exit('ERROR: OBP_BRIDGES entry "{}" is not an enabled OPENBRIDGE system in the main configuration'.format(_obp))
         _tgid_to_bridge = {}   # intra-OBP 1:1 ingress-fork check
         for _bridge, _val in _table.items():
-            _tgid, _ts = _val if isinstance(_val, (tuple, list)) else (_val, 1)
+            if isinstance(_val, (tuple, list)):
+                sys.exit('ERROR: OBP "{}" bridge "{}" specifies a timeslot. OpenBridge '
+                         'group traffic is TS1 on the wire by protocol -- write the TGID '
+                         'alone. To land this talkgroup on local TS2, set TS on the '
+                         'bridge\'s REPEATER/SERVER member in BRIDGES, not on the OBP row.'
+                         .format(_obp, _bridge))
+            _tgid = _val
 
             if _tgid in _tgid_to_bridge and _tgid_to_bridge[_tgid] != _bridge:
                 sys.exit('ERROR: OBP "{}" TGID {} maps to more than one bridge ("{}" and "{}") -- '
@@ -174,7 +188,7 @@ def expand_obp_bridges(_bridges, _obp_bridges):
             _tgid_to_bridge[_tgid] = _bridge
 
             _bridges.setdefault(_bridge, []).append({
-                'SYSTEM': _obp, 'TS': _ts, 'TGID': _tgid, 'ACTIVE': True,
+                'SYSTEM': _obp, 'TS': 1, 'TGID': _tgid, 'ACTIVE': True,
                 'TIMEOUT': 2, 'TO_TYPE': 'NONE', 'ON': [], 'OFF': [], 'RESET': [],
             })
             _bridge_obp_tgid.setdefault(_bridge, {})[_obp] = _tgid
@@ -475,7 +489,8 @@ class routerOBP(OPENBRIDGE):
 
         # Record the time of this packet so we can later identify a stale stream
         _target_status[_stream_id]['LAST'] = _pkt_time
-        # Clear the TS bit -- all OpenBridge streams are effectively on TS1
+        # Force the TS bit to 0 -- OpenBridge group traffic is TS1 on the wire by
+        # protocol. The far end derives its own local timeslot from the TGID.
         _tmp_bits = _bits & ~(1 << 7)
         _tmp_data = b''.join([_data[:8], _target['TGID'], _data[11:15], _tmp_bits.to_bytes(1, 'big'), _data[16:20]])
         _dmrpkt = embed_lc(_dmrpkt, _frame_type, _dtype_vseq, _target_status[_stream_id]['H_LC'], _target_status[_stream_id]['T_LC'], _target_status[_stream_id]['EMB_LC'])

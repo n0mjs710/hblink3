@@ -2,8 +2,9 @@
 #
 # Tests for expand_obp_bridges(): the per-OBP TGID<->bridge table (rules.OBP_BRIDGES)
 # that replaces inline OpenBridge bridge membership. Covers expansion into synthetic
-# members, the TS default + override, and the load-time validation (ingress-fork
-# ERROR, inter-OBP renumber WARNING, inline-OBP-member ERROR, non-OBP system ERROR).
+# members, the injected TS1 (and rejection of a per-row timeslot), and the load-time
+# validation (ingress-fork ERROR, inter-OBP renumber WARNING, inline-OBP-member ERROR,
+# non-OBP system ERROR).
 #
 # Run from the repo root:   venv/bin/python -m unittest discover -s tests
 
@@ -48,16 +49,19 @@ class TestExpandOBPBridges(unittest.TestCase):
         obp = bridges['B1'][1]
         self.assertEqual(obp['SYSTEM'], 'VESTA_OBP')
         self.assertEqual(obp['TGID'], 2)
-        self.assertEqual(obp['TS'], 1)                          # default
+        self.assertEqual(obp['TS'], 1)                          # injected: OBP wire is TS1
         self.assertTrue(obp['ACTIVE'])
         self.assertEqual(obp['TO_TYPE'], 'NONE')               # triggers hard-wired inert
         self.assertEqual((obp['ON'], obp['OFF'], obp['RESET']), ([], [], []))
 
-    def test_ts_override_tuple(self):
-        bridges = {}
-        bridge.expand_obp_bridges(bridges, {'VESTA_OBP': {'KS-STATEWIDE': (3120, 2)}})
-        m = bridges['KS-STATEWIDE'][0]
-        self.assertEqual((m['TGID'], m['TS']), (3120, 2))
+    def test_ts_tuple_rejected(self):
+        # A per-row timeslot is not configurable: OBP group traffic is TS1 on the wire,
+        # so a TS here could only make the row unmatchable and silently drop a
+        # talkgroup. Rejected at load rather than coerced.
+        for _val in ((3120, 2), (3120, 1), [3120, 2]):
+            with self.subTest(val=_val):
+                with self.assertRaises(SystemExit):
+                    bridge.expand_obp_bridges({}, {'VESTA_OBP': {'KS-STATEWIDE': _val}})
 
     def test_creates_obp_only_bridge(self):
         bridges = {}
@@ -159,10 +163,15 @@ class TestMigrateOBPRules(unittest.TestCase):
         self.assertEqual(obp_bridges['CC_OBP']['B8'], 8)       # but present in the table
         self.assertEqual(obp_bridges['VESTA_OBP']['B2'], 2)
 
-    def test_ts_override_becomes_tuple(self):
+    def test_ts2_inline_member_migrates_to_plain_tgid_and_warns(self):
+        # An old inline OBP member on TS2 never put TS2 on the wire (group egress has
+        # always forced TS1), so the migration emits the plain TGID and says so rather
+        # than carrying a setting that never took effect.
         old = {'BSW': [_member('VESTA_OBP', 2, 3120)]}          # TS 2 (non-default)
-        _, obp_bridges, _, _, _ = migrate_obp_rules.migrate(old, {'VESTA_OBP'})
-        self.assertEqual(obp_bridges['VESTA_OBP']['BSW'], (3120, 2))
+        _, obp_bridges, _, errors, warnings = migrate_obp_rules.migrate(old, {'VESTA_OBP'})
+        self.assertFalse(errors)
+        self.assertEqual(obp_bridges['VESTA_OBP']['BSW'], 3120)
+        self.assertTrue(any('timeslot' in w.lower() for w in warnings), warnings)
 
     def test_detects_ingress_fork(self):
         old = {'B1': [_member('VESTA_OBP', 1, 2)], 'B2': [_member('VESTA_OBP', 1, 2)]}
