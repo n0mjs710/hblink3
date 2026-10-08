@@ -5,6 +5,49 @@ baseline of the current state rather than enumerating the project's full history
 
 ## [Unreleased]
 
+### NUL-padded config fields from a connecting repeater are stripped
+
+The RPTC config blob is a fixed-width ASCII record that clients are expected to
+space-pad -- DMRGateway emits the whole thing from one `%-8.8s%09u%09u...`
+sprintf, and HBlink3's own peer mode uses `str.ljust()`. Some clients pad with
+NUL instead. The login never cared, because the blob is sliced positionally, so
+this surfaced only downstream: the reporting feed decoded each field with a bare
+`.strip()`, which removes whitespace but **not** NUL, and the padding rode
+through into the dashboard JSON as `"W0UK\u0000\u0000\u0000\u0000"` where
+every other repeater appeared cleanly stripped. A consumer calling `float()` on
+a NUL-padded latitude would also raise `ValueError` on that one peer.
+
+- Reporting now strips NUL as well as whitespace from decoded config fields, so
+  a dashboard sees the same clean text regardless of how a client padded.
+- The repeater-facing log lines still print the raw bytes on purpose: a client
+  padding the wrong way stays visible there for diagnosis.
+
+### OUTBOUND config blob padded exactly as DMRGateway pads it
+
+A system in `OUTBOUND` mode is itself the client sending the RPTC blob, and
+DMRGateway builds that record with a single sprintf:
+
+```
+"%-8.8s%09u%09u%02u%02u%8.8s%9.9s%03d%-20.20s%-19.19s%c%-124.124s%-40.40s%-40.40s"
+```
+
+That is three conventions, not one, and `config.py` now applies all three via
+`_pad_text` / `_pad_num` / `_pad_decimal`:
+
+| conversion | fill | fields |
+|---|---|---|
+| `%-N.Ns` | left-justified, space | `CALLSIGN`, `LOCATION`, `DESCRIPTION`, `URL`, `SOFTWARE_ID`, `PACKAGE_ID` |
+| `%0Nu` | right-justified, zero | `RX_FREQ`, `TX_FREQ`, `TX_POWER`, `COLORCODE`, `HEIGHT` |
+| `%N.Ns` | right-justified, space | `LATITUDE`, `LONGITUDE` |
+
+`TX_POWER`, `COLORCODE` and `HEIGHT` were already zero-filled. What changed is
+the frequencies (previously space-filled on the right, so a value shorter than
+nine digits was sent as `4448500` plus two trailing spaces rather than
+`004448500`) and latitude and
+longitude (previously left-justified). Values of the expected width — which is
+every well-formed config — go out byte for byte as before; `tests/test_protocol.py`
+now pins the assembled blob against that format string directly.
+
 ### OpenBridge both-slots extension removed — **breaking**
 
 HBlink3 carried a local extension to OpenBridge (`BOTH_SLOTS`) that allowed traffic on

@@ -883,8 +883,19 @@ class HBSYSTEM(asyncio.DatagramProtocol):
 
 
 # Decode a bytes config field to a stripped str; pass through non-bytes.
+#
+# Strips NUL as well as whitespace. The RPTC blob is a fixed-width ASCII record
+# that clients are expected to space-pad (DMRGateway emits it from one
+# "%-8.8s%09u%09u..." sprintf; our own peer mode uses str.ljust()), but some
+# clients pad with NUL instead, and bare str.strip() removes whitespace only.
+# Unstripped, that padding reaches consumers inside fields they treat as text:
+# json.dumps() renders a NUL-padded callsign as "W0UK\u0000\u0000\u0000\u0000",
+# and float() on a NUL-padded latitude raises ValueError. The login itself never
+# cared -- the blob is sliced positionally -- so nothing upstream flags this, and
+# the raw bytes stay in the log lines above on purpose, where a client padding
+# the wrong way is still visible for diagnosis.
 def _s(_v):
-    return _v.decode('utf-8', errors='ignore').strip() if isinstance(_v, (bytes, bytearray)) else _v
+    return _v.decode('utf-8', errors='ignore').strip('\x00').strip() if isinstance(_v, (bytes, bytearray)) else _v
 
 
 # JSON-serializable view of a single connected repeater. Shared by the full

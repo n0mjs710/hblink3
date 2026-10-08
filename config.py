@@ -122,6 +122,41 @@ def acl_build(_acl, _max):
 # Note that a stock xlxd is built with NB_OF_MODULES = 10 (modules A-J); asking for
 # a module the reflector does not have produces no link and no error message of any
 # kind, so the value is validated here for form only.
+# RPTC config blob field encoders, for a system in OUTBOUND mode (where HBlink3
+# is itself the client sending the blob). The 302-byte record is fixed-width
+# ASCII, and DMRGateway -- the client nearly every repeater on the air runs --
+# builds the whole thing with a single sprintf:
+#
+#   "%-8.8s%09u%09u%02u%02u%8.8s%9.9s%03d%-20.20s%-19.19s%c%-124.124s%-40.40s%-40.40s"
+#
+# That is three conventions, not one, and these three helpers are each one of
+# them. A server slices the blob positionally, so any padding gets a connection
+# up; the padding decides whether the values survive downstream, where they are
+# read as text. NUL fill is the one thing never to send: str.strip() removes
+# whitespace and not NUL, so NULs ride through a server's decode into its
+# dashboard, float() on a padded latitude raises, and a callsign-anchored ACL
+# stops matching. Zero fill on the numeric fields is what makes a power of "5"
+# read as "05" like every other client, rather than "5 ".
+#
+# Overlong values are truncated to the field width, as the ".N" precision in
+# each of those conversions does.
+
+def _pad_text(_value, _width):
+    """Left-justified, space-filled -- "%-N.Ns" (callsign, location, url, ...)."""
+    return bytes(_value, 'utf-8')[:_width].ljust(_width)
+
+def _pad_num(_value, _width):
+    """Right-justified, zero-filled -- "%0Nu" (frequencies, power, cc, height)."""
+    return bytes(_value, 'utf-8')[:_width].rjust(_width, b'0')
+
+def _pad_decimal(_value, _width):
+    """Right-justified, space-filled -- "%N.Ns" (latitude, longitude).
+
+    DMRGateway pre-formats these with "%08f"/"%09f" so its strings always fill
+    the width; a shorter configured value is what the justification is for.
+    """
+    return bytes(_value, 'utf-8')[:_width].rjust(_width)
+
 def _parse_xlx_module(_config, _section):
     if not _config.has_option(_section, 'XLX_MODULE'):
         return ''
@@ -214,21 +249,24 @@ def build_config(_config_file):
                         'SERVER_IP': getaddrinfo(config.get(section, 'SERVER_IP'), 0)[0][4][0],
                         'SERVER_PORT': config.getint(section, 'SERVER_PORT'),
                         'PASSPHRASE': bytes(config.get(section, 'PASSPHRASE'), 'utf-8'),
-                        'CALLSIGN': bytes(config.get(section, 'CALLSIGN').ljust(8)[:8], 'utf-8'),
+                        # RPTC fields are padded as DMRGateway pads them -- see
+                        # _pad_text/_pad_num/_pad_decimal above for the sprintf
+                        # conversion each one mirrors.
+                        'CALLSIGN': _pad_text(config.get(section, 'CALLSIGN'), 8),
                         'RADIO_ID': config.getint(section, 'RADIO_ID').to_bytes(4, 'big'),
-                        'RX_FREQ': bytes(config.get(section, 'RX_FREQ').ljust(9)[:9], 'utf-8'),
-                        'TX_FREQ': bytes(config.get(section, 'TX_FREQ').ljust(9)[:9], 'utf-8'),
-                        'TX_POWER': bytes(config.get(section, 'TX_POWER').rjust(2,'0'), 'utf-8'),
-                        'COLORCODE': bytes(config.get(section, 'COLORCODE').rjust(2,'0'), 'utf-8'),
-                        'LATITUDE': bytes(config.get(section, 'LATITUDE').ljust(8)[:8], 'utf-8'),
-                        'LONGITUDE': bytes(config.get(section, 'LONGITUDE').ljust(9)[:9], 'utf-8'),
-                        'HEIGHT': bytes(config.get(section, 'HEIGHT').rjust(3,'0'), 'utf-8'),
-                        'LOCATION': bytes(config.get(section, 'LOCATION').ljust(20)[:20], 'utf-8'),
-                        'DESCRIPTION': bytes(config.get(section, 'DESCRIPTION').ljust(19)[:19], 'utf-8'),
+                        'RX_FREQ': _pad_num(config.get(section, 'RX_FREQ'), 9),
+                        'TX_FREQ': _pad_num(config.get(section, 'TX_FREQ'), 9),
+                        'TX_POWER': _pad_num(config.get(section, 'TX_POWER'), 2),
+                        'COLORCODE': _pad_num(config.get(section, 'COLORCODE'), 2),
+                        'LATITUDE': _pad_decimal(config.get(section, 'LATITUDE'), 8),
+                        'LONGITUDE': _pad_decimal(config.get(section, 'LONGITUDE'), 9),
+                        'HEIGHT': _pad_num(config.get(section, 'HEIGHT'), 3),
+                        'LOCATION': _pad_text(config.get(section, 'LOCATION'), 20),
+                        'DESCRIPTION': _pad_text(config.get(section, 'DESCRIPTION'), 19),
                         'SLOTS': bytes(config.get(section, 'SLOTS'), 'utf-8'),
-                        'URL': bytes(config.get(section, 'URL').ljust(124)[:124], 'utf-8'),
-                        'SOFTWARE_ID': bytes(config.get(section, 'SOFTWARE_ID').ljust(40)[:40], 'utf-8'),
-                        'PACKAGE_ID': bytes(config.get(section, 'PACKAGE_ID').ljust(40)[:40], 'utf-8'),
+                        'URL': _pad_text(config.get(section, 'URL'), 124),
+                        'SOFTWARE_ID': _pad_text(config.get(section, 'SOFTWARE_ID'), 40),
+                        'PACKAGE_ID': _pad_text(config.get(section, 'PACKAGE_ID'), 40),
                         'GROUP_HANGTIME': config.getint(section, 'GROUP_HANGTIME'),
                         'OPTIONS': bytes(config.get(section, 'OPTIONS'), 'utf-8'),
                         'XLX_MODULE': _parse_xlx_module(config, section),

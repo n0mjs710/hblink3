@@ -309,6 +309,58 @@ class TestReportingNDJSON(unittest.TestCase):
             self.assertNotIn('PASSPHRASE', sysview)
             self.assertNotIn('SUB_ACL', sysview)
 
+    def test_nul_padded_config_fields_are_stripped(self):
+        # A client may pad the fixed-width RPTC blob with NUL instead of the
+        # space every other implementation uses. The login is unaffected (the
+        # blob is sliced positionally), but bare str.strip() leaves NUL in
+        # place, so unstripped padding reaches consumers as "W0UK\u0000..."
+        # in the JSON and makes float() on a latitude raise.
+        peer = {
+            'CALLSIGN': b'W0UK\x00\x00\x00\x00',
+            'LOCATION': b'Lawrence, KS\x00\x00\x00\x00\x00\x00\x00\x00',
+            'RX_FREQ':  b'144850000',
+            'SLOTS':    b'3',
+        }
+        view = hblink.json_repeater(bytes_4(3120666), peer)
+        self.assertEqual(view['CALLSIGN'], 'W0UK')
+        self.assertEqual(view['LOCATION'], 'Lawrence, KS')
+        self.assertNotIn('\x00', json.dumps(view))
+
+    def test_outbound_config_blob_matches_dmrgateway_format(self):
+        # The send side, for a system in OUTBOUND mode: config.py pads the RPTC
+        # fields the way DMRGateway's single sprintf does -- text left/space,
+        # numerics right/zero, lat-long right/space. Pinned against that format
+        # string verbatim; Python's % implements these conversions exactly as
+        # C's printf does. The REPEATER-1 harness system is the OUTBOUND one.
+        c = CFG['SYSTEMS']['REPEATER-1']
+        blob = b''.join([
+            c['CALLSIGN'], c['RX_FREQ'], c['TX_FREQ'], c['TX_POWER'],
+            c['COLORCODE'], c['LATITUDE'], c['LONGITUDE'], c['HEIGHT'],
+            c['LOCATION'], c['DESCRIPTION'], c['SLOTS'], c['URL'],
+            c['SOFTWARE_ID'], c['PACKAGE_ID'],
+        ])
+        expected = (
+            "%-8.8s%09u%09u%02u%02u%8.8s%9.9s%03d%-20.20s%-19.19s%c"
+            "%-124.124s%-40.40s%-40.40s" % (
+                'W1ABC', 449000000, 444000000, 25, 1, '38.0000', '-095.0000',
+                75, 'Anywhere, USA', 'harness peer', '1', 'www.w1abc.org',
+                '20170620', 'MMDVM_HBlink',
+            )
+        ).encode()
+        self.assertEqual(blob, expected)
+        self.assertEqual(len(blob), 294)
+        self.assertNotIn(0, blob)
+        self.assertEqual(c['TX_POWER'], b'25')
+        self.assertEqual(c['COLORCODE'], b'01')     # "%02u" -- not b'1 '
+        self.assertEqual(c['HEIGHT'], b'075')       # "%03d"
+
+    def test_space_padded_config_fields_still_strip(self):
+        # The conforming padding keeps working unchanged.
+        peer = {'CALLSIGN': b'WA0EDA  ', 'LOCATION': b'Lawrence, KS        '}
+        view = hblink.json_repeater(bytes_4(312000), peer)
+        self.assertEqual(view['CALLSIGN'], 'WA0EDA')
+        self.assertEqual(view['LOCATION'], 'Lawrence, KS')
+
 
 class TestBridgeStreamEvents(unittest.TestCase):
     # BridgeReportServer.send_bridge_event() turns the CSV strings the routing
