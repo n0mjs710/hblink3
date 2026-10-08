@@ -310,11 +310,8 @@ class TestReportingNDJSON(unittest.TestCase):
             self.assertNotIn('SUB_ACL', sysview)
 
     def test_nul_padded_config_fields_are_stripped(self):
-        # A client may pad the fixed-width RPTC blob with NUL instead of the
-        # space every other implementation uses. The login is unaffected (the
-        # blob is sliced positionally), but bare str.strip() leaves NUL in
-        # place, so unstripped padding reaches consumers as "W0UK\u0000..."
-        # in the JSON and makes float() on a latitude raise.
+        # str.strip() leaves NUL in place; unstripped it reaches consumers as
+        # "W0UK\u0000..." in the JSON and makes float() on a latitude raise.
         peer = {
             'CALLSIGN': b'W0UK\x00\x00\x00\x00',
             'LOCATION': b'Lawrence, KS\x00\x00\x00\x00\x00\x00\x00\x00',
@@ -327,11 +324,8 @@ class TestReportingNDJSON(unittest.TestCase):
         self.assertNotIn('\x00', json.dumps(view))
 
     def test_outbound_config_blob_matches_dmrgateway_format(self):
-        # The send side, for a system in OUTBOUND mode: config.py pads the RPTC
-        # fields the way DMRGateway's single sprintf does -- text left/space,
-        # numerics right/zero, lat-long right/space. Pinned against that format
-        # string verbatim; Python's % implements these conversions exactly as
-        # C's printf does. The REPEATER-1 harness system is the OUTBOUND one.
+        # Send side: the OUTBOUND blob against DMRGateway's format string
+        # verbatim. REPEATER-1 is the harness's OUTBOUND system.
         c = CFG['SYSTEMS']['REPEATER-1']
         blob = b''.join([
             c['CALLSIGN'], c['RX_FREQ'], c['TX_FREQ'], c['TX_POWER'],
@@ -355,7 +349,6 @@ class TestReportingNDJSON(unittest.TestCase):
         self.assertEqual(c['HEIGHT'], b'075')       # "%03d"
 
     def test_space_padded_config_fields_still_strip(self):
-        # The conforming padding keeps working unchanged.
         peer = {'CALLSIGN': b'WA0EDA  ', 'LOCATION': b'Lawrence, KS        '}
         view = hblink.json_repeater(bytes_4(312000), peer)
         self.assertEqual(view['CALLSIGN'], 'WA0EDA')

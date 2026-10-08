@@ -123,23 +123,12 @@ def acl_build(_acl, _max):
 # a module the reflector does not have produces no link and no error message of any
 # kind, so the value is validated here for form only.
 # RPTC config blob field encoders, for a system in OUTBOUND mode (where HBlink3
-# is itself the client sending the blob). The 302-byte record is fixed-width
-# ASCII, and DMRGateway -- the client nearly every repeater on the air runs --
-# builds the whole thing with a single sprintf:
-#
-#   "%-8.8s%09u%09u%02u%02u%8.8s%9.9s%03d%-20.20s%-19.19s%c%-124.124s%-40.40s%-40.40s"
-#
-# That is three conventions, not one, and these three helpers are each one of
-# them. A server slices the blob positionally, so any padding gets a connection
-# up; the padding decides whether the values survive downstream, where they are
-# read as text. NUL fill is the one thing never to send: str.strip() removes
-# whitespace and not NUL, so NULs ride through a server's decode into its
-# dashboard, float() on a padded latitude raises, and a callsign-anchored ACL
-# stops matching. Zero fill on the numeric fields is what makes a power of "5"
-# read as "05" like every other client, rather than "5 ".
-#
-# Overlong values are truncated to the field width, as the ".N" precision in
-# each of those conversions does.
+# is the client sending the blob). Padding per DMRGateway's config-blob sprintf
+#   "%-8.8s%09u%09u%02u%02u%8.8s%9.9s%03d%-20.20s%-19.19s%c%-124.124s%-40.40s%-40.40s":
+# text left-justified/space, numerics right-justified/zero, lat-long
+# right-justified/space. Never NUL -- a server slices the blob positionally, so
+# NUL padding connects but leaves NULs in fields consumers read as text.
+# Overlong values truncate to the field width, as the ".N" precision does.
 
 def _pad_text(_value, _width):
     """Left-justified, space-filled -- "%-N.Ns" (callsign, location, url, ...)."""
@@ -150,11 +139,7 @@ def _pad_num(_value, _width):
     return bytes(_value, 'utf-8')[:_width].rjust(_width, b'0')
 
 def _pad_decimal(_value, _width):
-    """Right-justified, space-filled -- "%N.Ns" (latitude, longitude).
-
-    DMRGateway pre-formats these with "%08f"/"%09f" so its strings always fill
-    the width; a shorter configured value is what the justification is for.
-    """
+    """Right-justified, space-filled -- "%N.Ns" (latitude, longitude)."""
     return bytes(_value, 'utf-8')[:_width].rjust(_width)
 
 def _parse_xlx_module(_config, _section):
@@ -249,9 +234,7 @@ def build_config(_config_file):
                         'SERVER_IP': getaddrinfo(config.get(section, 'SERVER_IP'), 0)[0][4][0],
                         'SERVER_PORT': config.getint(section, 'SERVER_PORT'),
                         'PASSPHRASE': bytes(config.get(section, 'PASSPHRASE'), 'utf-8'),
-                        # RPTC fields are padded as DMRGateway pads them -- see
-                        # _pad_text/_pad_num/_pad_decimal above for the sprintf
-                        # conversion each one mirrors.
+                        # Padding per DMRGateway; see _pad_* above.
                         'CALLSIGN': _pad_text(config.get(section, 'CALLSIGN'), 8),
                         'RADIO_ID': config.getint(section, 'RADIO_ID').to_bytes(4, 'big'),
                         'RX_FREQ': _pad_num(config.get(section, 'RX_FREQ'), 9),
