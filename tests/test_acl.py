@@ -68,6 +68,7 @@ class _FakeSystem:
         self._laststrid = {1: b'', 2: b''}
 
 
+PEER = bytes_4(312000)
 SID = b'\x11\x22\x33\x44'
 SID2 = b'\xaa\xbb\xcc\xdd'
 
@@ -75,48 +76,48 @@ SID2 = b'\xaa\xbb\xcc\xdd'
 class TestAclMatching(unittest.TestCase):
     def test_permit_all_allows_both_slots(self):
         sysobj = _FakeSystem(_aclset(True), _aclset(True))
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 1, SID))
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 2, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 1, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 2, SID))
 
     def test_global_subscriber_deny_drops_only_matching_sub(self):
         sysobj = _FakeSystem(_aclset(True, sub='DENY:1'), _aclset(True))
-        self.assertTrue(sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 1, SID))
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(2), bytes_3(9), 1, SID))
+        self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(1), bytes_3(9), 1, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(2), bytes_3(9), 1, SID))
 
     def test_global_tg1_acl_is_slot1_only(self):
         sysobj = _FakeSystem(_aclset(True, tg1='DENY:9'), _aclset(True))
         # Denied on TS1...
-        self.assertTrue(sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 1, SID))
+        self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 1, SID))
         # ...but TS2 is governed by TG2_ACL (PERMIT:ALL here), so it passes
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 2, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 2, SID))
 
     def test_global_tg2_acl_is_slot2_only(self):
         sysobj = _FakeSystem(_aclset(True, tg2='DENY:9'), _aclset(True))
-        self.assertTrue(sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 2, SID))
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 1, SID))
+        self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 2, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 1, SID))
 
     def test_system_acl_applies_when_global_disabled(self):
         sysobj = _FakeSystem(_aclset(False, sub='DENY:1'),
                              _aclset(True, sub='DENY:5'))
         # Global is off so its DENY:1 is ignored; system DENY:5 still applies
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 1, SID))
-        self.assertTrue(sysobj.dmrd_acl_check(bytes_3(5), bytes_3(9), 1, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(1), bytes_3(9), 1, SID))
+        self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(5), bytes_3(9), 1, SID))
 
     def test_both_disabled_allows_everything(self):
         sysobj = _FakeSystem(_aclset(False, sub='DENY:1'),
                              _aclset(False, sub='DENY:1'))
-        self.assertFalse(sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 1, SID))
+        self.assertFalse(sysobj.dmrd_acl_check(PEER, bytes_3(1), bytes_3(9), 1, SID))
 
 
 class TestAclDedup(unittest.TestCase):
     def test_allow_does_not_touch_laststrid(self):
         sysobj = _FakeSystem(_aclset(True), _aclset(True))
-        sysobj.dmrd_acl_check(bytes_3(1234), bytes_3(9), 1, SID)
+        sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 1, SID)
         self.assertEqual(sysobj._laststrid[1], b'')
 
     def test_drop_records_stream_id_for_its_slot(self):
         sysobj = _FakeSystem(_aclset(True, sub='DENY:1'), _aclset(True))
-        sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 2, SID)
+        sysobj.dmrd_acl_check(PEER, bytes_3(1), bytes_3(9), 2, SID)
         self.assertEqual(sysobj._laststrid[2], SID)
         self.assertEqual(sysobj._laststrid[1], b'')
 
@@ -125,11 +126,23 @@ class TestAclDedup(unittest.TestCase):
         with self.assertLogs('hblink', level='INFO') as cm:
             # Same dropped stream three times -> a single log line
             for _ in range(3):
-                self.assertTrue(sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 1, SID))
+                self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(1), bytes_3(9), 1, SID))
             # A new stream id -> logs again
-            self.assertTrue(sysobj.dmrd_acl_check(bytes_3(1), bytes_3(9), 1, SID2))
+            self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(1), bytes_3(9), 1, SID2))
         drops = [m for m in cm.output if 'CALL DROPPED' in m]
         self.assertEqual(len(drops), 2)
+
+    def test_drop_line_names_peer_subscriber_and_tgid(self):
+        # The whole point of the line is telling the operator who to go talk to.
+        sysobj = _FakeSystem(_aclset(True), _aclset(True, tg2='DENY:9'))
+        with self.assertLogs('hblink', level='INFO') as cm:
+            self.assertTrue(sysobj.dmrd_acl_check(PEER, bytes_3(1234), bytes_3(9), 2, SID))
+        line = cm.output[0]
+        self.assertIn('PEER: 312000', line)
+        self.assertIn('SUBSCRIBER: 1234', line)
+        self.assertIn('TGID: 9', line)
+        self.assertIn('TS2', line)
+        self.assertIn('SYSTEM TS2 ACL', line)
 
 
 class TestAclCheckEquivalence(unittest.TestCase):

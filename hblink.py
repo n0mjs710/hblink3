@@ -208,29 +208,27 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
                     logger.error('(%s) OpenBridge packet discarded because it was not received on slot 1. SID: %s, TGID %s', self._system, int_id(_rf_src), int_id(_dst_id))
                     return
 
-                # ACL Processing
+                # ACL Processing. The peer ID on an OpenBridge frame is the far-side
+                # network's, not the repeater the user keyed up -- unless that network
+                # sends with PRESERVE_SOURCE_PEER -- so the subscriber ID is the field
+                # that identifies the offender here. Log both and let the operator judge.
+                def _drop(_acl):
+                    if _stream_id not in self._laststrid:
+                        logger.info('(%s) CALL DROPPED BY %s -- PEER: %s SUBSCRIBER: %s TGID: %s TS%s STREAM ID: %s',
+                                    self._system, _acl, int_id(_peer_id), int_id(_rf_src),
+                                    int_id(_dst_id), _slot, int_id(_stream_id))
+                        self._laststrid.append(_stream_id)
+
                 if self._CONFIG['GLOBAL']['USE_ACL']:
                     if not acl_check(_rf_src, self._CONFIG['GLOBAL']['SUB_ACL']):
-                        if _stream_id not in self._laststrid:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL', self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid.append(_stream_id)
-                        return
+                        return _drop('GLOBAL SUBSCRIBER ACL')
                     if _slot == 1 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG1_ACL']):
-                        if _stream_id not in self._laststrid:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid.append(_stream_id)
-                        return
+                        return _drop('GLOBAL TS1 ACL')
                 if self._config['USE_ACL']:
                     if not acl_check(_rf_src, self._config['SUB_ACL']):
-                        if _stream_id not in self._laststrid:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL', self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid.append(_stream_id)
-                        return
+                        return _drop('SYSTEM SUBSCRIBER ACL')
                     if not acl_check(_dst_id, self._config['TG1_ACL']):
-                        if _stream_id not in self._laststrid:
-                            logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM ACL', self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid.append(_stream_id)
-                        return
+                        return _drop('SYSTEM TS1 ACL')
 
                 # Userland actions -- typically this is the function you subclass for an application
                 self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data)
@@ -482,27 +480,32 @@ class HBSYSTEM(asyncio.DatagramProtocol):
     # Apply GLOBAL then SYSTEM ACLs to an inbound DMRD frame. Returns True if the
     # call must be dropped (logging each dropped stream only once per slot), else False.
     # Used by both the server and outbound receive paths, which share identical ACL logic.
-    def dmrd_acl_check(self, _rf_src, _dst_id, _slot, _stream_id):
-        def _drop(_msg, _id):
+    def dmrd_acl_check(self, _peer_id, _rf_src, _dst_id, _slot, _stream_id):
+        # Every drop line carries the whole identity of the frame -- peer, subscriber,
+        # TGID, slot -- and not just the one field the ACL matched on: the operator
+        # reading the log has to know which repeater and which radio to go talk to.
+        def _drop(_acl):
             if self._laststrid[_slot] != _stream_id:
-                logger.info(_msg, self._system, int_id(_stream_id), int_id(_id))
+                logger.info('(%s) CALL DROPPED BY %s -- PEER: %s SUBSCRIBER: %s TGID: %s TS%s STREAM ID: %s',
+                            self._system, _acl, int_id(_peer_id), int_id(_rf_src),
+                            int_id(_dst_id), _slot, int_id(_stream_id))
                 self._laststrid[_slot] = _stream_id
             return True
 
         if self._CONFIG['GLOBAL']['USE_ACL']:
             if not acl_check(_rf_src, self._CONFIG['GLOBAL']['SUB_ACL']):
-                return _drop('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL', _rf_src)
+                return _drop('GLOBAL SUBSCRIBER ACL')
             if _slot == 1 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG1_ACL']):
-                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', _dst_id)
+                return _drop('GLOBAL TS1 ACL')
             if _slot == 2 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG2_ACL']):
-                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL', _dst_id)
+                return _drop('GLOBAL TS2 ACL')
         if self._config['USE_ACL']:
             if not acl_check(_rf_src, self._config['SUB_ACL']):
-                return _drop('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL', _rf_src)
+                return _drop('SYSTEM SUBSCRIBER ACL')
             if _slot == 1 and not acl_check(_dst_id, self._config['TG1_ACL']):
-                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL', _dst_id)
+                return _drop('SYSTEM TS1 ACL')
             if _slot == 2 and not acl_check(_dst_id, self._config['TG2_ACL']):
-                return _drop('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL', _dst_id)
+                return _drop('SYSTEM TS2 ACL')
         return False
 
     def server_dereg(self):
@@ -539,7 +542,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                 _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
                 _stream_id = _data[16:20]
                 # ACL Processing
-                if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
+                if self.dmrd_acl_check(_peer_id, _rf_src, _dst_id, _slot, _stream_id):
                     return
 
                 # The basic purpose of a server is to repeat to the repeaters
@@ -769,7 +772,7 @@ class HBSYSTEM(asyncio.DatagramProtocol):
                     _stream_id = _data[16:20]
 
                     # ACL Processing
-                    if self.dmrd_acl_check(_rf_src, _dst_id, _slot, _stream_id):
+                    if self.dmrd_acl_check(_peer_id, _rf_src, _dst_id, _slot, _stream_id):
                         return
 
 

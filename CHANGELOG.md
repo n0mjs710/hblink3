@@ -5,6 +5,29 @@ baseline of the current state rather than enumerating the project's full history
 
 ## [Unreleased]
 
+### ACL drop log lines name the peer and the subscriber
+
+A dropped call used to be logged with only the field the ACL matched on, so a
+TGID drop read `CALL DROPPED WITH STREAM ID 2808369834 ON TGID 310999 BY SYSTEM
+TS2 ACL` -- naming neither the repeater that sent the frame nor the radio that
+keyed it. The `(%s)` at the front is the *configured system* the frame arrived
+on (e.g. `REPEATERS`), not the peer, so there was nothing in the line to act
+on: an operator seeing bad traffic had no way to tell who to go talk to.
+
+Every ACL drop now logs the whole identity of the frame in one format, with the
+ACL that rejected it named up front:
+
+```
+(REPEATERS) CALL DROPPED BY SYSTEM TS2 ACL -- PEER: 312000 SUBSCRIBER: 3129672 TGID: 310999 TS2 STREAM ID: 2808369834
+```
+
+This covers both the shared server/OUTBOUND path and OpenBridge. On an
+OpenBridge the peer ID is the far-side *network's* ID rather than the
+originating repeater, unless that network sends with `PRESERVE_SOURCE_PEER`, so
+there the subscriber ID is the field that identifies the offender.
+
+The per-stream dedup is unchanged: each dropped stream still logs once.
+
 ### NUL-padded config fields from a connecting repeater are stripped
 
 The RPTC config blob is a fixed-width ASCII record that clients are expected to
