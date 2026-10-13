@@ -78,7 +78,7 @@ BRIDGE_BY_SYSTEM = {}
 # 141, as MMDVMHost counts them); byte 54 is the RSSI as -dBm, 0 = no reading.
 # stream_update events go out at most every SIG_UPDATE_INTERVAL seconds, and only
 # when the values changed.
-SIG_UPDATE_INTERVAL = 3.0
+SIG_UPDATE_INTERVAL = 2.0
 AMBE_BITS_PER_FRAME = 141
 
 def _sig_new():

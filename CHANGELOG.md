@@ -21,7 +21,7 @@ Reporting-feed changes, for other consumers:
   and `ber_pct` (percent, one decimal). `stream_start` has the first frame's
   reading; `stream_end` has the last RSSI reading and the BER over the whole call.
 - New `stream_update` event, RX only, with `system`, `stream_id`, `slot`, `trx`
-  and the current `rssi_dbm` / `ber_pct`. Sent at most every 3 seconds per
+  and the current `rssi_dbm` / `ber_pct`. Sent at most every 2 seconds per
   stream, and only when a value changed. Its BER covers the frames since the
   previous update; a field missing from an update means there is no reading now.
 - A field is omitted whenever there is no reading. RSSI 0 on the wire is HBP's "no
