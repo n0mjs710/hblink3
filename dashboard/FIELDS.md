@@ -35,6 +35,7 @@ and its state is remembered in your browser.
 | Source | The source repeater/peer the call entered on (callsign and ID if known). |
 | TS | The timeslot the call used. |
 | Talkgroup | The destination talkgroup (name and ID), or subscriber for a unit call. |
+| Signal | How well the repeater received the caller (see **Signal** under **Call cell**): the live reading while the call is active, then the call's final reading. Blank when there is no reading, e.g. for calls arriving over OpenBridge. |
 | When | **Active** while the call is in progress, otherwise how long ago it was heard. |
 
 ---

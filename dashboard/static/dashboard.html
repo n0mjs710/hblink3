@@ -54,6 +54,10 @@
   .meter i.on{opacity:1}
   .meter .b1{height:3px}.meter .b2{height:5px}.meter .b3{height:7px}.meter .b4{height:10px}
   .sig-good{color:#4ade80}.sig-fair{color:var(--warn)}.sig-poor{color:#f87171}
+  /* Last Heard: readout in the table's own type size and weight, meter scaled to match */
+  .lh-sig .sigbox{font-size:inherit;font-weight:inherit}
+  .lh-sig .meter{height:12px}
+  .lh-sig .meter .b1{height:4px}.lh-sig .meter .b2{height:6px}.lh-sig .meter .b3{height:9px}.lh-sig .meter .b4{height:12px}
   .status-ok{color:#4ade80;font-weight:600}
   .status-bad{color:#f87171;font-weight:600}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
@@ -298,6 +302,8 @@ function renderLog(){ el('log').innerHTML = ST.log.map(logRow).join(''); }
 // Most-recent unique callers, derived from the RX (ingress) call log — no server
 // state of its own. Deduped by source radio ID, newest first.
 function lhActiveSrc(src){ for(const k in ST.active){ if(String(ST.active[k].src)===String(src)) return true; } return false; }
+// The caller's active RX leg, which carries the live signal reading.
+function lhActiveRx(src){ for(const k in ST.active){ const a=ST.active[k]; if(a.trx==='RX' && String(a.src)===String(src)) return a; } return null; }
 function renderLastHeard(){
   const box = el('lastHeard'); if(!box) return;
   const seen = {}, rows = [];
@@ -309,7 +315,7 @@ function renderLastHeard(){
     if(rows.length >= LAST_HEARD_COUNT) break;
   }
   if(!rows.length){ box.innerHTML = '<div class="empty">'+(lastHeardCollapsed?'No active calls':'No calls heard yet')+'</div>'; return; }
-  let h = '<table><tr><th>User</th><th>Type</th><th>Source</th><th>TS</th><th>Talkgroup</th><th>When</th></tr>';
+  let h = '<table><tr><th>User</th><th>Type</th><th>Source</th><th>TS</th><th>Talkgroup</th><th>Signal</th><th>When</th></tr>';
   for(const e of rows){
     const src = e.peer!=null ? idName(e.peer_alias, e.peer) : esc(e.system||'');
     const t = e._ts ? e._ts*1000 : (e._arrived||Date.now());
@@ -321,6 +327,7 @@ function renderLastHeard(){
        + '<td class="mono sub">'+src+'</td>'
        + '<td class="mono">TS'+esc(e.slot||'?')+'</td>'
        + '<td>'+idName(e.dst_alias,e.dst)+'</td>'
+       + '<td class="lh-sig">'+sigBox(lhActiveRx(e.src) || e)+'</td>'      // live while active, then the call's final reading
        + '<td>'+when+'</td></tr>';
   }
   box.innerHTML = h+'</table>';
@@ -410,6 +417,7 @@ function applyUpdate(m){
   const a=ST.active[skey(m)]; if(!a) return;
   for(const f of ['rssi_dbm','ber_pct']){ if(f in m) a[f]=m[f]; else delete a[f]; }
   renderSystem(m.system);
+  renderLastHeard();
 }
 
 let sock=null;
@@ -503,10 +511,9 @@ if(new URLSearchParams(location.search).has('demo')){
   ST.log = [
     { _arrived:_t-3000,   action:'START', call_type:'GROUP VOICE', system:'BRANDMEISTER', slot:2, src:3188765, src_alias:'N0CAL',  dst:9,    dst_alias:'KS Statewide'  },
     { _arrived:_t-5000,   action:'START', call_type:'GROUP VOICE', system:'KS-SERVER',    slot:1, src:3112001, src_alias:'W0ABC',  dst:31,   dst_alias:'US Nationwide' },
-    { _arrived:_t-4000,   action:'END',   call_type:'GROUP VOICE', system:'KC-OUTBOUND',  slot:2, src:3161001, src_alias:'W0DEF',  dst:3100, dst_alias:'MO Local',      duration:14.2 },
-    { _arrived:_t-4000,   action:'END',   call_type:'GROUP VOICE', system:'KS-SERVER',    slot:2, src:3161001, src_alias:'W0DEF',  dst:3100, dst_alias:'MO Local',      duration:14.2 },
+    { _arrived:_t-4000,   action:'END',   call_type:'GROUP VOICE', system:'KS-SERVER',    slot:2, src:3161001, src_alias:'W0DEF',  dst:3100, dst_alias:'MO Local',      duration:14.2, rssi_dbm:-98, ber_pct:3.1 },
     { _arrived:_t-18200,  action:'START', call_type:'GROUP VOICE', system:'KS-SERVER',    slot:2, src:3161001, src_alias:'W0DEF',  dst:3100, dst_alias:'MO Local'       },
-    { _arrived:_t-129000, action:'END',   call_type:'GROUP VOICE', system:'KS-SERVER',    slot:1, src:3112002, src_alias:'KD0XYZ', dst:31,   dst_alias:'US Nationwide', duration:8.7 },
+    { _arrived:_t-129000, action:'END',   call_type:'GROUP VOICE', system:'KS-SERVER',    slot:1, src:3112002, src_alias:'KD0XYZ', dst:31,   dst_alias:'US Nationwide', duration:8.7, rssi_dbm:-112, ber_pct:6.2 },
     { _arrived:_t-137700, action:'START', call_type:'GROUP VOICE', system:'KS-SERVER',    slot:1, src:3112002, src_alias:'KD0XYZ', dst:31,   dst_alias:'US Nationwide' },
   ];
 
