@@ -477,7 +477,7 @@ class TestSupersessionEnd(unittest.TestCase):
         captured = []
 
         class Rep:
-            def send_bridge_event(self, data):
+            def send_bridge_event(self, data, extra=None):
                 captured.append(data.decode() if isinstance(data, (bytes, bytearray)) else data)
 
         return bridge.routerHBP('SERVER-1', cfg, Rep()), captured

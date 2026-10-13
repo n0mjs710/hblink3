@@ -42,6 +42,14 @@
   .call.rx .sub,.call.tx .sub,.call.hang .sub{color:inherit;opacity:.85}
   .call .call-top{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .call b{color:var(--text)}
+  .call .call-top.flexrow{display:flex;align-items:center;gap:6px}
+  .call .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto}
+  .sigbox{flex:0 0 auto;font-weight:600;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .meter{display:inline-flex;align-items:flex-end;gap:1px;height:10px;vertical-align:-1px}
+  .meter i{display:block;width:3px;background:currentColor;opacity:.25;border-radius:1px}
+  .meter i.on{opacity:1}
+  .meter .b1{height:3px}.meter .b2{height:5px}.meter .b3{height:7px}.meter .b4{height:10px}
+  .sig-good{color:#4ade80}.sig-fair{color:var(--warn)}.sig-poor{color:#f87171}
   .status-ok{color:#4ade80;font-weight:600}
   .status-bad{color:#f87171;font-weight:600}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
@@ -107,12 +115,32 @@ const callShort = ct => ct==='GROUP VOICE'?'Group Voice':ct==='UNIT VOICE'?'Unit
 function activeBySlot(sys){ const r={1:null,2:null}; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) r[e.slot]=e;} return r; }
 function activeList(sys){ const a=[]; for(const k in ST.active){const e=ST.active[k]; if(e.system===sys) a.push(e);} return a; }
 
-function callCell(e, klass, hang){
+// Received signal on an RX pill: 4-bar meter + dBm, then BER only when non-zero.
+// rssi_dbm / ber_pct are absent when there is no reading.
+function sigBars(dbm){ return dbm>=-85?4: dbm>=-95?3: dbm>=-105?2: dbm>=-115?1:0; }
+function sigBox(o){
+  const hasR = o && o.rssi_dbm!=null, hasB = o && o.ber_pct>0;
+  if(!hasR && !hasB) return '';
+  let h='<span class="sigbox" title="'+(hasR?o.rssi_dbm+' dBm':'')+(hasR&&hasB?' · ':'')+(hasB?'BER '+o.ber_pct.toFixed(1)+'%':'')+'">';
+  if(hasR){
+    const n=sigBars(o.rssi_dbm), cls=n>=3?'sig-good':n==2?'sig-fair':'sig-poor';
+    h+='<span class="meter '+cls+'">';
+    for(let i=1;i<=4;i++) h+='<i class="b'+i+(i<=n?' on':'')+'"></i>';
+    h+='</span> <span class="'+cls+'">−'+Math.abs(o.rssi_dbm)+'</span>';
+  }
+  if(hasB) h+=' <span class="'+(o.ber_pct>=5?'sig-poor':'sig-fair')+'">'+o.ber_pct.toFixed(1)+'%</span>';
+  return h+'</span>';
+}
+
+// hangSig=false hides the final reading on a hang pill (repeaters that only heard
+// the repeated call).
+function callCell(e, klass, hang, hangSig){
   if(!e && hang){
     const tg   = hang.dst_alias ? esc(hang.dst_alias) : esc(String(hang.dst||''));
     const left = Math.max(0, hang._expires - Date.now()/1000);
+    const sig  = (hang.trx==='RX' && hangSig!==false) ? sigBox(hang) : '';
     return '<div class="call hang">'
-         + '<div class="call-top">'+esc(hang.trx)+' hang → '+tg+'</div>'
+         + '<div class="call-top flexrow"><span class="ell">'+esc(hang.trx)+' hang → '+tg+'</span>'+sig+'</div>'
          + '<div class="sub mono"><span class="js-countdown" data-rem="'+left.toFixed(1)+'" data-arr="'+Date.now()+'">'+dur(left)+'</span> remaining</div>'
          + '</div>';
   }
@@ -121,7 +149,7 @@ function callCell(e, klass, hang){
   const dst = e.dst_alias ? esc(e.dst_alias) : e.dst;
   const d='<span class="js-dur" data-start="'+e._arrived+'">'+dur((Date.now()-e._arrived)/1000)+'</span>';
   return '<div class="call '+klass+'">'
-       + '<div class="call-top">'+src+' → '+dst+'</div>'
+       + '<div class="call-top flexrow"><span class="ell">'+src+' → '+dst+'</span>'+(klass==='rx'?sigBox(e):'')+'</div>'
        + '<div class="sub mono">'+esc(e.trx)+' · '+callShort(e.call_type)+' · '+e.src+' · '+d+'</div>'
        + '</div>';
 }
@@ -170,7 +198,7 @@ function renderServers(){
     for(const pid of pids){
       const p=repeaters[pid];
       const cell=(slot)=>{ const e=act[slot], hang=ST.hang[n+'|'+slot]||null;
-        if(!e) return callCell(null, null, hang);
+        if(!e) return callCell(null, null, hang, !!hang && String(hang.peer)===String(p.RADIO_ID));
         // Colour purely by direction: the call's own RX/TX for the source repeater,
         // TX (red) for the others, which are hearing the repeated traffic.
         return callCell(e, String(e.peer)===String(p.RADIO_ID) ? (e.trx==='TX'?'tx':'rx') : 'tx', hang); };
@@ -363,12 +391,21 @@ function applyStream(e){
     if(ht>0) ST.hang[hkey] = Object.assign({}, e, {_expires: Date.now()/1000 + ht});
   }
   if(e.trx==='RX'){ ST.log.unshift(e); if(ST.log.length>400) ST.log.pop(); renderLog(); renderLastHeard(); }
-  // re-render the affected system class
-  const sys=ST.systems[e.system];
+  renderSystem(e.system);
+}
+// re-render the class of system a stream belongs to
+function renderSystem(name){
+  const sys=ST.systems[name];
   if(sys&&sys.MODE==='SERVER') renderServers();
   else if(sys&&sys.MODE==='OUTBOUND') renderOutbounds();
   else if(sys&&sys.MODE==='OPENBRIDGE') renderOpenbridges();
   else renderServers();
+}
+// Current signal reading for an active RX stream; an absent field means no reading now.
+function applyUpdate(m){
+  const a=ST.active[skey(m)]; if(!a) return;
+  for(const f of ['rssi_dbm','ber_pct']){ if(f in m) a[f]=m[f]; else delete a[f]; }
+  renderSystem(m.system);
 }
 
 let sock=null;
@@ -386,6 +423,7 @@ function connect(){
       renderServers(); renderOutbounds(); renderOpenbridges(); }
     else if(m.type==='bridges'){ ST.bridges=m.bridges||{}; renderBridges(); }
     else if(m.type==='stream_start'||m.type==='stream_end'){ applyStream(m); }
+    else if(m.type==='stream_update'){ applyUpdate(m); }
   };
   sock.onclose=()=>{ setConn(false); el('conn').textContent='HBlink: dashboard offline'; setTimeout(connect,2000); };
 }
@@ -444,7 +482,7 @@ if(new URLSearchParams(location.search).has('demo')){
   // W0ABC on US Nationwide TS1 (started 5s ago); N0CAL on KS Statewide TS2 (started 3s ago).
   // _arrived in ms; keepalive window is 30s so setting recently to prevent demo-mode reaping.
   ST.active = {
-    'KS-SERVER|1|aabb0011':    { system:'KS-SERVER',    slot:1, stream_id:'aabb0011', trx:'RX', action:'START', call_type:'GROUP VOICE', src:3112001, src_alias:'W0ABC',  dst:31,   dst_alias:'US Nationwide', peer:3112001, _arrived:_t-5000 },
+    'KS-SERVER|1|aabb0011':    { system:'KS-SERVER',    slot:1, stream_id:'aabb0011', trx:'RX', action:'START', call_type:'GROUP VOICE', src:3112001, src_alias:'W0ABC',  dst:31,   dst_alias:'US Nationwide', peer:3112001, _arrived:_t-5000, rssi_dbm:-71, ber_pct:0.8 },
     'KS-SERVER|2|ccdd0022':    { system:'KS-SERVER',    slot:2, stream_id:'ccdd0022', trx:'TX', action:'START', call_type:'GROUP VOICE', src:3188765, src_alias:'N0CAL',  dst:9,    dst_alias:'KS Statewide',  peer:9990001, _arrived:_t-3000 },
     'KC-OUTBOUND|1|aabb0011':  { system:'KC-OUTBOUND',  slot:1, stream_id:'aabb0011', trx:'TX', action:'START', call_type:'GROUP VOICE', src:3112001, src_alias:'W0ABC',  dst:31,   dst_alias:'US Nationwide', peer:3112001, _arrived:_t-5000 },
     'BRANDMEISTER|1|aabb0011': { system:'BRANDMEISTER', slot:1, stream_id:'aabb0011', trx:'TX', action:'START', call_type:'GROUP VOICE', src:3112001, src_alias:'W0ABC',  dst:31,   dst_alias:'US Nationwide', peer:3112001, _arrived:_t-5000 },

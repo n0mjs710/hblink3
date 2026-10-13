@@ -291,6 +291,18 @@ async def handle_event(evt):
         if evt['trx'] == 'RX':
             STATE.log.appendleft(evt)
         await broadcast(evt)
+    elif t == 'stream_update':
+        # Current signal reading for an active RX stream. A field absent from the
+        # update means there is no reading now, so it is removed, not kept.
+        stream = STATE.streams.get(stream_key(evt))
+        if stream is None:
+            return
+        for f in ('rssi_dbm', 'ber_pct'):
+            if f in evt:
+                stream[f] = evt[f]
+            else:
+                stream.pop(f, None)
+        await broadcast(evt)
     elif t == 'ping':
         pass   # liveness heartbeat; receiving it already reset the feed read timeout
     else:

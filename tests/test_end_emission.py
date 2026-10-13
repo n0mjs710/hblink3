@@ -34,8 +34,11 @@ class _Report:
     def __init__(self):
         self.events = []
 
-    def send_bridge_event(self, data):
+    def send_bridge_event(self, data, extra=None):
         self.events.append(data.decode())
+
+    def send_stream_update(self, system, stream_id, slot, fields):
+        pass
 
 
 def _world():

@@ -5,6 +5,29 @@ baseline of the current state rather than enumerating the project's full history
 
 ## [Unreleased]
 
+### Received signal (RSSI and BER) on the dashboard
+
+The RSSI and BER bytes that HBP repeaters append to every DMRD frame were passed
+through but never reported. The dashboard now shows them on the slot pill of a
+call received from a repeater or hotspot: a 4-bar meter with the level in dBm,
+then the bit error rate when there is one (red at 5% and above). The pill keeps
+the call's final reading through hang time. OpenBridge carries no signal bytes, so
+calls arriving over OpenBridge never show one.
+
+Reporting-feed changes, for other consumers:
+
+- RX `stream_start` and `stream_end` may carry `rssi_dbm` (integer, negative dBm)
+  and `ber_pct` (percent, one decimal). `stream_start` has the first frame's
+  reading; `stream_end` has the last RSSI reading and the BER over the whole call.
+- New `stream_update` event, RX only, with `system`, `stream_id`, `slot`, `trx`
+  and the current `rssi_dbm` / `ber_pct`. Sent at most every 3 seconds per
+  stream, and only when a value changed. Its BER covers the frames since the
+  previous update; a field missing from an update means there is no reading now.
+- A field is omitted whenever there is no reading. RSSI 0 on the wire is HBP's "no
+  reading". BER is counted as MMDVMHost does (corrected bit errors out of 141 per
+  voice frame) and omitted unless errors were counted, since a source that doesn't
+  measure BER sends 0, which looks the same as an error-free frame.
+
 ### ACL drop log lines name the peer and the subscriber
 
 A dropped call used to be logged with only the field the ACL matched on, so a

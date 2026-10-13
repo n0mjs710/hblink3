@@ -73,6 +73,48 @@ UNIT_MAP = {}
 BRIDGE_SRC_INDEX = {}
 BRIDGE_BY_SYSTEM = {}
 
+# Received signal reporting (HBP RX only; OpenBridge frames carry no BER/RSSI
+# trailer). DMRD byte 53 is the corrected AMBE bit errors in a voice frame (out of
+# 141, as MMDVMHost counts them); byte 54 is the RSSI as -dBm, 0 = no reading.
+# stream_update events go out at most every SIG_UPDATE_INTERVAL seconds, and only
+# when the values changed.
+SIG_UPDATE_INTERVAL = 3.0
+AMBE_BITS_PER_FRAME = 141
+
+def _sig_new():
+    return {'rssi': 0, 'err': 0, 'frames': 0, 'win_err': 0, 'win_frames': 0,
+            'sent': None, 'sent_at': 0.0}
+
+def _sig_sample(sig, _frame_type, _data):
+    if len(_data) < 55:
+        return
+    if _data[54]:
+        sig['rssi'] = _data[54]
+    if _frame_type in (HBPF_VOICE, HBPF_VOICE_SYNC):
+        sig['err'] += _data[53]
+        sig['frames'] += 1
+        sig['win_err'] += _data[53]
+        sig['win_frames'] += 1
+
+def _ber_pct(err, frames):
+    # None when there is nothing to show: no frames, no errors, or < 0.05%.
+    if not frames or not err:
+        return None
+    pct = round(err * 100.0 / (AMBE_BITS_PER_FRAME * frames), 1)
+    return pct if pct > 0 else None
+
+# Report fields for a stream: rssi_dbm is the last reading of the call, ber_pct is
+# over the whole call, or over the frames since the last update when window=True.
+# A field is omitted when there is no reading.
+def _sig_fields(sig, window=False):
+    out = {}
+    if sig['rssi']:
+        out['rssi_dbm'] = -sig['rssi']
+    ber = _ber_pct(sig['win_err'], sig['win_frames']) if window else _ber_pct(sig['err'], sig['frames'])
+    if ber is not None:
+        out['ber_pct'] = ber
+    return out
+
 # The reporting server manager; assigned in async_main when REPORT is enabled.
 # Module-global so the rule-timer and stream-trimmer loops can reach it.
 report_server = None
@@ -650,6 +692,7 @@ class routerHBP(HBSYSTEM):
                 # stream is reported once -- not once per colliding frame.
                 'RX_COLLISION_SID': b'\x00',
                 'RX_CT':        'GROUP VOICE',
+                'RX_SIG':       _sig_new(),
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
                 'TX_T_LC':      b'\x00',
@@ -686,6 +729,7 @@ class routerHBP(HBSYSTEM):
                 # stream is reported once -- not once per colliding frame.
                 'RX_COLLISION_SID': b'\x00',
                 'RX_CT':        'GROUP VOICE',
+                'RX_SIG':       _sig_new(),
                 'RX_LC':        b'\x00',
                 'TX_H_LC':      b'\x00',
                 'TX_T_LC':      b'\x00',
@@ -713,7 +757,30 @@ class routerHBP(HBSYSTEM):
             self._report.send_bridge_event('{},END,RX,{},{},{},{},{},{},{:.2f}'.format(
                 st.get('RX_CT', 'GROUP VOICE'), self._system, int_id(st['RX_STREAM_ID']),
                 int_id(st['RX_PEER']), int_id(st['RX_RFS']), _slot, int_id(st['RX_TGID']),
-                duration).encode(encoding='utf-8', errors='ignore'))
+                duration).encode(encoding='utf-8', errors='ignore'), _sig_fields(st['RX_SIG']))
+
+    # New RX stream on a slot: start its signal tracking from this first frame and
+    # return the fields for the START event.
+    def _sig_start(self, _slot, _frame_type, _data, pkt_time):
+        sig = self.STATUS[_slot]['RX_SIG'] = _sig_new()
+        _sig_sample(sig, _frame_type, _data)
+        sig['sent'] = _sig_fields(sig)
+        sig['sent_at'] = pkt_time
+        return sig['sent']
+
+    # Mid-call: emit a stream_update with the current reading if the update
+    # interval has passed and the values changed since the last event.
+    def _sig_update(self, _slot, _stream_id, pkt_time):
+        sig = self.STATUS[_slot]['RX_SIG']
+        if pkt_time - sig['sent_at'] < SIG_UPDATE_INTERVAL:
+            return
+        fields = _sig_fields(sig, window=True)
+        sig['win_err'] = sig['win_frames'] = 0
+        sig['sent_at'] = pkt_time
+        if fields != sig['sent']:
+            sig['sent'] = fields
+            if CONFIG['REPORTS']['REPORT'] and self._report:
+                self._report.send_stream_update(self._system, int_id(_stream_id), _slot, fields)
 
 
     def group_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _frame_type, _dtype_vseq, _stream_id, _data):
@@ -726,7 +793,8 @@ class routerHBP(HBSYSTEM):
         UNIT_MAP[_rf_src] = (self.name, pkt_time)
 
         # Is this a new call stream?
-        if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
+        _new_stream = _stream_id != self.STATUS[_slot]['RX_STREAM_ID']
+        if _new_stream:
             if (not self.STATUS[_slot]['RX_TERMINATED']) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
                 if self.STATUS[_slot]['RX_COLLISION_SID'] != _stream_id:
                     self.STATUS[_slot]['RX_COLLISION_SID'] = _stream_id
@@ -740,10 +808,11 @@ class routerHBP(HBSYSTEM):
             self.STATUS[_slot]['RX_START'] = pkt_time
             self.STATUS[_slot]['RX_TERMINATED'] = False
             self.STATUS[_slot]['RX_CT'] = 'GROUP VOICE'
+            _sig_start_fields = self._sig_start(_slot, _frame_type, _data, pkt_time)
             logger.info('(%s) *GROUP CALL START* STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot)
             if CONFIG['REPORTS']['REPORT']:
-                self._report.send_bridge_event('GROUP VOICE,START,RX,{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id)).encode(encoding='utf-8', errors='ignore'))
+                self._report.send_bridge_event('GROUP VOICE,START,RX,{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id)).encode(encoding='utf-8', errors='ignore'), _sig_start_fields)
 
             # If we can, use the LC from the voice header as to keep all options intact
             if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
@@ -775,6 +844,12 @@ class routerHBP(HBSYSTEM):
             if _bridge_state_changed and CONFIG['REPORTS']['REPORT'] and report_server:
                 report_server.send_bridge()
 
+        _is_term = (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM)
+        if not _new_stream:
+            _sig_sample(self.STATUS[_slot]['RX_SIG'], _frame_type, _data)
+            if not _is_term:
+                self._sig_update(_slot, _stream_id, pkt_time)
+
         # Hand each active target the frame; the target system applies its own
         # admission/contention policy and egress framing (see bridge_group).
         _src_lc = self.STATUS[_slot]['RX_LC']
@@ -795,7 +870,7 @@ class routerHBP(HBSYSTEM):
             logger.info('(%s) *GROUP CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s, Duration: %.2f', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, call_duration)
             if CONFIG['REPORTS']['REPORT']:
-               self._report.send_bridge_event('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'))
+               self._report.send_bridge_event('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'), _sig_fields(self.STATUS[_slot]['RX_SIG']))
 
             #
             # Begin in-band signalling for call end. This has nothign to do with routing traffic directly.
@@ -934,7 +1009,8 @@ class routerHBP(HBSYSTEM):
         
         
         # Is this a new call stream?
-        if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
+        _new_stream = _stream_id != self.STATUS[_slot]['RX_STREAM_ID']
+        if _new_stream:
             
             # Collision in progress, bail out!
             if (not self.STATUS[_slot]['RX_TERMINATED']) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
@@ -961,10 +1037,17 @@ class routerHBP(HBSYSTEM):
             self.STATUS[_slot]['RX_START'] = pkt_time
             self.STATUS[_slot]['RX_TERMINATED'] = False
             self.STATUS[_slot]['RX_CT'] = 'UNIT VOICE'
+            _sig_start_fields = self._sig_start(_slot, _frame_type, _data, pkt_time)
             logger.info('(%s) *UNIT CALL START* STREAM ID: %s SUB: %s (%s) PEER: %s (%s) UNIT: %s (%s), TS: %s, FORWARD: %s', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, self._targets)
             if CONFIG['REPORTS']['REPORT']:
-                self._report.send_bridge_event('UNIT VOICE,START,RX,{},{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), self._targets).encode(encoding='utf-8', errors='ignore'))
+                self._report.send_bridge_event('UNIT VOICE,START,RX,{},{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), self._targets).encode(encoding='utf-8', errors='ignore'), _sig_start_fields)
+
+        _is_term = (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM)
+        if not _new_stream:
+            _sig_sample(self.STATUS[_slot]['RX_SIG'], _frame_type, _data)
+            if not _is_term:
+                self._sig_update(_slot, _stream_id, pkt_time)
 
         for _target in self._targets:
             systems[_target].bridge_unit(
@@ -980,7 +1063,7 @@ class routerHBP(HBSYSTEM):
             logger.info('(%s) *UNIT CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) UNIT %s (%s), TS %s, Duration: %.2f', \
                     self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, call_duration)
             if CONFIG['REPORTS']['REPORT']:
-               self._report.send_bridge_event('UNIT VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'))
+               self._report.send_bridge_event('UNIT VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'), _sig_fields(self.STATUS[_slot]['RX_SIG']))
 
         # Mark status variables for use later
         self.STATUS[_slot]['RX_PEER']      = _peer_id
@@ -1072,8 +1155,9 @@ class BridgeReportServer(ReportServer):
     def send_bridge(self):
         self._send_json({'type': 'bridges', 'bridges': json_bridges(BRIDGES)})
 
-    def send_bridge_event(self, _data):
-        # Call sites pass a CSV string; convert to a JSON stream event.
+    def send_bridge_event(self, _data, _extra=None):
+        # Call sites pass a CSV string; convert to a JSON stream event. _extra holds
+        # optional fields merged in as-is (rssi_dbm / ber_pct on RX START and END).
         # CSV: call_type,action,trx,system,stream_id,peer,src,slot,dst[,duration]
         if isinstance(_data, (bytes, bytearray)):
             _data = _data.decode('utf-8', errors='ignore')
@@ -1099,6 +1183,16 @@ class BridgeReportServer(ReportServer):
         except (IndexError, ValueError):
             logger.error('(REPORT) malformed bridge event: %s', _data)
             return
+        if _extra:
+            event.update(_extra)
+        self._send_json(event)
+
+    # Mid-call signal reading for an active RX stream. Carries the current values;
+    # a field absent here means there is no reading now.
+    def send_stream_update(self, _system, _stream_id, _slot, _fields):
+        event = {'type': 'stream_update', 'system': _system, 'stream_id': _stream_id,
+                 'slot': _slot, 'trx': 'RX'}
+        event.update(_fields)
         self._send_json(event)
 
     def periodic_push(self):
