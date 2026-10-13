@@ -10,7 +10,8 @@ baseline of the current state rather than enumerating the project's full history
 The RSSI and BER bytes that HBP repeaters append to every DMRD frame were passed
 through but never reported. The dashboard now shows them on the slot pill of a
 call received from a repeater or hotspot: a 4-bar meter with the level in dBm,
-then the bit error rate when there is one (red at 5% and above). The pill keeps
+then the bit error rate when there is one (green up to 2%, amber above, red at
+5% and above). The pill keeps
 the call's final reading through hang time. OpenBridge carries no signal bytes, so
 calls arriving over OpenBridge never show one.
 

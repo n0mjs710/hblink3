@@ -128,7 +128,7 @@ function sigBox(o){
     for(let i=1;i<=4;i++) h+='<i class="b'+i+(i<=n?' on':'')+'"></i>';
     h+='</span> <span class="'+cls+'">−'+Math.abs(o.rssi_dbm)+'</span>';
   }
-  if(hasB) h+=' <span class="'+(o.ber_pct>=5?'sig-poor':'sig-fair')+'">'+o.ber_pct.toFixed(1)+'%</span>';
+  if(hasB) h+=' <span class="'+(o.ber_pct>=5?'sig-poor':o.ber_pct>2?'sig-fair':'sig-good')+'">'+o.ber_pct.toFixed(1)+'%</span>';
   return h+'</span>';
 }
 
