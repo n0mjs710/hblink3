@@ -128,12 +128,14 @@ function activeList(sys){ const a=[]; for(const k in ST.active){const e=ST.activ
 // Received signal on an RX pill: 4-bar meter + dBm, then BER only when non-zero.
 // rssi_dbm / ber_pct are absent when there is no reading.
 function sigBars(dbm){ return dbm>=-85?4: dbm>=-95?3: dbm>=-105?2: dbm>=-115?1:0; }
+// Level colour, independent of the bar count: green >= -106 dBm, amber >= -113, red below.
+function sigClass(dbm){ return dbm>=-106?'sig-good': dbm>=-113?'sig-fair':'sig-poor'; }
 function sigBox(o){
   const hasR = o && o.rssi_dbm!=null, hasB = o && o.ber_pct>0;
   if(!hasR && !hasB) return '';
   let h='<span class="sigbox" title="'+(hasR?o.rssi_dbm+' dBm':'')+(hasR&&hasB?' · ':'')+(hasB?'BER '+o.ber_pct.toFixed(1)+'%':'')+'">';
   if(hasR){
-    const n=sigBars(o.rssi_dbm), cls=n>=3?'sig-good':n==2?'sig-fair':'sig-poor';
+    const n=sigBars(o.rssi_dbm), cls=sigClass(o.rssi_dbm);
     h+='<span class="meter '+cls+'">';
     for(let i=1;i<=4;i++) h+='<i class="b'+i+(i<=n?' on':'')+'"></i>';
     h+='</span> <span class="'+cls+'">−'+Math.abs(o.rssi_dbm)+'</span>';
