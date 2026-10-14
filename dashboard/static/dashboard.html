@@ -54,7 +54,9 @@
   .meter i.on{opacity:1}
   .meter .b1{height:3px}.meter .b2{height:5px}.meter .b3{height:7px}.meter .b4{height:10px}
   .sig-good{color:#4ade80}.sig-fair{color:var(--warn)}.sig-poor{color:#f87171}
-  /* Last Heard: readout in the table's own type size and weight, meter scaled to match */
+  /* Last Heard: readout in the table's own type size and weight, meter scaled to match.
+     Fixed column width (widest readout ~106px + padding) so readings can't resize the table. */
+  .lh-sig{width:130px;white-space:nowrap}
   .lh-sig .sigbox{font-size:inherit;font-weight:inherit}
   .lh-sig .meter{height:12px}
   .lh-sig .meter .b1{height:4px}.lh-sig .meter .b2{height:6px}.lh-sig .meter .b3{height:9px}.lh-sig .meter .b4{height:12px}
@@ -315,7 +317,7 @@ function renderLastHeard(){
     if(rows.length >= LAST_HEARD_COUNT) break;
   }
   if(!rows.length){ box.innerHTML = '<div class="empty">'+(lastHeardCollapsed?'No active calls':'No calls heard yet')+'</div>'; return; }
-  let h = '<table><tr><th>User</th><th>Type</th><th>Source</th><th>TS</th><th>Talkgroup</th><th>Signal</th><th>When</th></tr>';
+  let h = '<table><tr><th>User</th><th>Type</th><th>Source</th><th>TS</th><th>Talkgroup</th><th class="lh-sig">Signal</th><th>When</th></tr>';
   for(const e of rows){
     const src = e.peer!=null ? idName(e.peer_alias, e.peer) : esc(e.system||'');
     const t = e._ts ? e._ts*1000 : (e._arrived||Date.now());
