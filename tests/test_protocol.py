@@ -430,6 +430,42 @@ class TestOpenBridgeSlotAdmission(unittest.TestCase):
                 self.assertEqual(seen[0][5], call)    # _call_type
 
 
+class TestOpenBridgeDiscardLogging(unittest.TestCase):
+    """A discarded OBP frame names its cause: wrong source socket or bad HMAC."""
+
+    PASSPHRASE = TestOpenBridgeSlotAdmission.PASSPHRASE
+    _frame = TestOpenBridgeSlotAdmission._frame
+    _obp = TestOpenBridgeSlotAdmission._obp
+
+    def _discard(self, packet, sockaddr):
+        obp, seen, _ = self._obp()
+        with self.assertLogs('hblink', level='INFO') as cm:
+            obp.datagram_received(packet, sockaddr)
+        self.assertEqual(seen, [])
+        self.assertEqual(len(cm.output), 1)
+        return cm.output[0]
+
+    def test_wrong_source_port(self):
+        ip, port = CFG['SYSTEMS']['OBP-1']['TARGET_SOCK']
+        msg = self._discard(self._frame(slot=1, unit=False), (ip, port + 1))
+        self.assertIn('unexpected source %s:%s' % (ip, port + 1), msg)
+        self.assertIn('expected TARGET_IP:TARGET_PORT %s:%s' % (ip, port), msg)
+        self.assertNotIn('HMAC', msg)
+
+    def test_bad_hmac(self):
+        sock = CFG['SYSTEMS']['OBP-1']['TARGET_SOCK']
+        frame = self._frame(slot=1, unit=False)
+        msg = self._discard(frame[:53] + bytes(20), sock)
+        self.assertIn('HMAC failed', msg)
+        self.assertNotIn('unexpected source', msg)
+
+    def test_wrong_source_and_bad_hmac_reports_source(self):
+        ip, port = CFG['SYSTEMS']['OBP-1']['TARGET_SOCK']
+        frame = self._frame(slot=1, unit=False)
+        msg = self._discard(frame[:53] + bytes(20), (ip, port + 1))
+        self.assertIn('unexpected source', msg)
+
+
 class TestTransportSend(unittest.TestCase):
     def test_openbridge_send_uses_sendto_to_target(self):
         obp = hblink.OPENBRIDGE('OBP-1', CFG, None)

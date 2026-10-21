@@ -232,8 +232,10 @@ class OPENBRIDGE(asyncio.DatagramProtocol):
 
                 # Userland actions -- typically this is the function you subclass for an application
                 self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data)
+            elif _sockaddr != self._config['TARGET_SOCK']:
+                logger.info('(%s) OpenBridge packet from unexpected source %s:%s (expected TARGET_IP:TARGET_PORT %s:%s), packet discarded', self._system, _sockaddr[0], _sockaddr[1], self._config['TARGET_SOCK'][0], self._config['TARGET_SOCK'][1])
             else:
-                logger.info('(%s) OpenBridge HMAC failed, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]), repr(_packet[53:])) 
+                logger.info('(%s) OpenBridge HMAC failed (PASSPHRASE mismatch?), packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]), repr(_packet[53:]))
 
 
 #************************************************
