@@ -2,7 +2,11 @@
 
 HBlink3 is an open-source implementation of the DMR **HomeBrew Repeater Protocol (HBP)** in Python 3. It acts as an HBP server and/or client and routes calls between MMDVM-based DMR systems, working as a **transit / conference-bridge router** — traffic is selectively routed from ingress systems to egress systems according to a rules file. It can also connect to other HBlink3 and similar systems via **OpenBridge**.
 
-> **Which HBlink?** HBlink3 is "system-oriented" and built for **transit routing and conference bridging** between networks. Its companion, **HBlink4** (by the same author), is a repeater-oriented **endpoint server** for running a single end-point network with no granudlar transit routing. Pick the one that matches your role.
+> **Which HBlink?** HBlink3 is not an older HBlink4. They implement two different network models:
+> - **HBlink3: transit routing between networks.** It works like the Internet: each HBlink3 domain is like an autonomous system, and OpenBridge links domains together the way routers connect at network boundaries. An HBlink3 system is a group of repeaters sharing one administrative policy, which is how many operators want their DMR systems to work. `hblink.py` is a protocol stack, and `bridge.py` is the router built on it. You can build your own applications on the same stack.
+> - **HBlink4: your network's own server.** A club or regional network runs it for its own talkgroups, and repeaters and hotspots use DMRGateway to reach other networks directly. For many repeaters that each set their own linking, HBlink4's per-connection model fits better.
+>
+> Many networks will want both. KS-DMR runs HBlink4 for DMRGateway-connected hotspots and repeaters, and HBlink3 for the repeaters it owns and links.
 
 > ⚠️ **Upgrading? Two breaking config changes to know about.**
 > 1. **OpenBridge routing moved** — `MODE: OPENBRIDGE` systems are no longer inline `BRIDGES` members in `rules.py`; they now live in a dedicated **`OBP_BRIDGES`** table. Old configs stop with a clear startup error. Run **`python tools/migrate_obp_rules.py`** to convert your `rules.py` automatically, or see [CONFIGURING.md](CONFIGURING.md#obp_bridges).
