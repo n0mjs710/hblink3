@@ -466,6 +466,38 @@ class TestOpenBridgeDiscardLogging(unittest.TestCase):
         self.assertIn('unexpected source', msg)
 
 
+class TestOpenBridgePassphrase(unittest.TestCase):
+    """OBP PASSPHRASE is used whole as the HMAC key, up to 80 characters."""
+
+    def _parse(self, _value):
+        import configparser
+        parser = configparser.ConfigParser()
+        parser.add_section('OBP-1')
+        parser.set('OBP-1', 'PASSPHRASE', _value)
+        return config._parse_obp_passphrase(parser, 'OBP-1')
+
+    def test_short_key_unpadded(self):
+        self.assertEqual(self._parse('password'), b'password')
+
+    def test_short_key_hmac_unchanged(self):
+        # The former NUL padding to 20 bytes is HMAC-neutral (HMAC zero-pads the
+        # key to the block size), so existing short-key links still verify.
+        from hashlib import sha1
+        from hmac import new as hmac_new
+        data = bytes(53)
+        self.assertEqual(hmac_new(self._parse('password'), data, sha1).digest(),
+                         hmac_new(b'password'.ljust(20, b'\x00'), data, sha1).digest())
+
+    def test_long_key_not_truncated(self):
+        key = 'k' * 21
+        self.assertEqual(self._parse(key), key.encode())
+        self.assertEqual(self._parse('k' * 80), b'k' * 80)
+
+    def test_over_80_rejected(self):
+        with self.assertRaises(SystemExit):
+            self._parse('k' * 81)
+
+
 class TestTransportSend(unittest.TestCase):
     def test_openbridge_send_uses_sendto_to_target(self):
         obp = hblink.OPENBRIDGE('OBP-1', CFG, None)

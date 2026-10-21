@@ -175,7 +175,7 @@ OpenBridge is a Server-to-Server (both ends equal), always-TS1 link authenticate
 | `ENABLED` | `False` ⇒ skipped. |
 | `IP` / `PORT` | Our own local bind address/port. |
 | `TARGET_IP` / `TARGET_PORT` | The far OpenBridge server's address/port. |
-| `PASSPHRASE` | Shared HMAC-SHA1 key. **Must match exactly on both ends** — this plus the source socket *is* the authentication. |
+| `PASSPHRASE` | Shared HMAC-SHA1 key, up to 80 characters, used whole. **Must match exactly on both ends** — this plus the source socket *is* the authentication. |
 | `NETWORK_ID` | A DMR-ID-shaped number identifying this server. By convention it is stamped into every outgoing frame's "Repeater ID" field. |
 | `PRESERVE_SOURCE_PEER` | `True` forwards the **originating** peer ID in that Repeater-ID field instead of overwriting it with `NETWORK_ID`. The field is unvalidated (auth is the HMAC + source socket) and used only for logging/reporting, so this simply preserves a call's true source across the link. Default `False` (spec-conventional). Most useful when **both** ends enable it. |
 | `USE_ACL` / `SUB_ACL` | This link's subscriber ACL. |

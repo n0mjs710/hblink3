@@ -5,6 +5,23 @@ baseline of the current state rather than enumerating the project's full history
 
 ## [Unreleased]
 
+### OpenBridge passphrase is used whole
+
+An OPENBRIDGE `PASSPHRASE` longer than 20 characters was silently cut to its
+first 20 characters, so its HMAC never matched a peer that uses the whole key --
+HBlink4 or BrandMeister. The OpenBridge spec sets no key length; the 20 bytes it
+specifies are the HMAC signature. The passphrase is now used whole, up to 80
+characters; a longer one stops HBlink3 at startup with an error. Links with a
+passphrase of 20 characters or fewer are unaffected.
+
+**Action required** if a passphrase is over 20 characters: both ends must use the
+full passphrase. A peer that was matching HBlink3's truncation (another older
+HBlink3) must be upgraded at the same time.
+
+A discarded OpenBridge frame is now logged with its cause: a source address that
+is not `TARGET_IP:TARGET_PORT` is reported as such, with both addresses, rather
+than as an HMAC failure.
+
 ### Received signal (RSSI and BER) on the dashboard
 
 The RSSI and BER bytes that HBP repeaters append to every DMRD frame were passed

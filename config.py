@@ -154,6 +154,15 @@ def _parse_xlx_module(_config, _section):
                  'the talkgroup is derived from the letter.'.format(_section, _module))
     return _module
 
+OBP_PASSPHRASE_MAX = 80
+
+def _parse_obp_passphrase(_config, _section):
+    _passphrase = _config.get(_section, 'PASSPHRASE')
+    if len(_passphrase) > OBP_PASSPHRASE_MAX:
+        sys.exit('OPENBRIDGE CONFIGURATION ERROR: PASSPHRASE for system "{}" is {} characters; '
+                 'the maximum is {}.'.format(_section, len(_passphrase), OBP_PASSPHRASE_MAX))
+    return bytes(_passphrase, 'utf-8')
+
 def build_config(_config_file):
     config = configparser.ConfigParser()
 
@@ -294,7 +303,7 @@ def build_config(_config_file):
                         'NETWORK_ID': config.getint(section, 'NETWORK_ID').to_bytes(4, 'big'),
                         'IP': getaddrinfo(config.get(section, 'IP'), 0)[0][4][0],
                         'PORT': config.getint(section, 'PORT'),
-                        'PASSPHRASE': bytes(config.get(section, 'PASSPHRASE').ljust(20,'\x00')[:20], 'utf-8'),
+                        'PASSPHRASE': _parse_obp_passphrase(config, section),
                         'TARGET_SOCK': ( getaddrinfo(config.get(section, 'TARGET_IP'), 0)[0][4][0], config.getint(section, 'TARGET_PORT') ),
                         'TARGET_IP': getaddrinfo(config.get(section, 'TARGET_IP'), 0)[0][4][0],
                         'TARGET_PORT': config.getint(section, 'TARGET_PORT'),
