@@ -158,9 +158,34 @@ HBlink masquerades as a repeater/hotspot and dials out to another Server. Most f
 | `LATITUDE` / `LONGITUDE` / `HEIGHT` / `LOCATION` / `DESCRIPTION` / `URL` | Reported location/metadata. |
 | `SLOTS` | Slot capability reported to the Server. |
 | `SOFTWARE_ID` / `PACKAGE_ID` | Reported software/package identifiers. |
-| `OPTIONS` | Free-form options string some Servers parse for per-connection settings. Leave empty if unused. |
+| `OPTIONS` | Free-form options string some Servers parse for per-connection settings. Leave empty if unused. xlxd acknowledges it and discards it, so it cannot select an XLX module; see `XLX_MODULE`. |
+| `XLX_MODULE` | Optional. Marks this system as an XLX reflector connection and names its module; see below. |
 | `GROUP_HANGTIME` | As above. |
 | `USE_ACL` / `SUB_ACL` / `TGID_TS1_ACL` / `TGID_TS2_ACL` | This system's ACLs. (No `REG_ACL` — a Client doesn't accept registrations.) |
+
+#### Connecting to an XLX reflector
+
+An XLX reflector speaks the same protocol as any other Server, so it is a `MODE: OUTBOUND` system with `XLX_MODULE` added. A full stanza is in `hblink-SAMPLE.cfg`.
+
+| Field | Value for XLX |
+|---|---|
+| `XLX_MODULE` | The module letter, `A`-`Z`. A stock xlxd has only `A`-`J` and silently ignores any other letter. |
+| `LOOSE` | `True`. xlxd's login replies don't carry the radio ID that strict validation checks for. |
+| `SERVER_PORT` | `62030`. |
+| `PASSPHRASE` | Usually `passw0rd`. |
+| `RADIO_ID` | A registered DMR ID that xlxd can look up, no larger than 16777215. A 9-digit ID with an ESSID is a startup error. |
+| `OPTIONS` | Leave empty. |
+
+The system must also be mapped to a bridge in [`XLX_BRIDGES`](#xlx_bridges) to carry traffic.
+
+HBlink selects the module with a private call to 4000 + the module number (A = 4001, D = 4004), sent right after login and again after every reconnect. It first sends a call to 4000 to unlink, because xlxd ignores a link while the connection already holds a module.
+
+xlxd never acknowledges the link, and no frame says which module a connection is in. To confirm it worked, look for these lines:
+
+- HBlink's log, at `INFO`: `XLX module link sent: unlink then module D (TG 4004)`. This shows only that the link was sent.
+- xlxd's output: `DMRmmdvm client <callsign> linking on module D`, or the module letter on the reflector's dashboard.
+
+> ⚠️ **Upgrading from an older HBlink:** `MODE: XLXPEER` and `XLXMODULE: 4004` are no longer read, and either one is a startup error. Use `MODE: OUTBOUND` and `XLX_MODULE: D`.
 
 ### `MODE: OPENBRIDGE` (server-to-server link)
 
@@ -194,8 +219,8 @@ A dict. Each **key** is an arbitrary bridge name (`'WORLDWIDE'`, `'STATEWIDE'`, 
 | Key | Meaning |
 |---|---|
 | `SYSTEM` | The system's section name from `hblink.cfg`. **Must match exactly.** |
-| `TS` | Timeslot (`1` or `2`) this rule matches. (XLX links should always use TS 2.) |
-| `TGID` | Talkgroup ID this rule matches. (XLX links should always use TG 9.) |
+| `TS` | Timeslot (`1` or `2`) this rule matches. |
+| `TGID` | Talkgroup ID this rule matches. |
 | `ACTIVE` | `True`/`False` — is this system currently passing traffic on this bridge? (Triggers below can flip it at runtime.) |
 | `TO_TYPE` | Timeout behavior: `'ON'` = auto-turn-**off** after `TIMEOUT`; `'OFF'` = auto-turn-**on** after `TIMEOUT`; anything else (use `'NONE'`) = no timer. |
 | `TIMEOUT` | Timer length in **minutes**. (Minutes only — timers cost performance.) |
@@ -285,6 +310,20 @@ python tools/migrate_obp_rules.py --config hblink.cfg --rules rules.py --out rul
 ```
 
 It reads `hblink.cfg` to learn which systems are `OPENBRIDGE`, lifts each inline OBP member into `OBP_BRIDGES`, prints a summary of what moved, flags any ingress-fork **ERROR** or renumber **WARNING**, and writes a new file (it never overwrites your `rules.py`). Review the output — comments from the original are not carried over — then replace `rules.py` with it.
+
+## `XLX_BRIDGES`
+
+**XLX systems are configured here, not as inline `BRIDGES` members.** Listing one in `BRIDGES` is a startup error. Each entry maps an XLX system from `hblink.cfg` to one bridge by name. The name must match the bridge in `BRIDGES` exactly; any other name creates a new bridge with only the XLX system on it, and no error:
+
+```python
+XLX_BRIDGES = {
+    'XLX-950-D': 'WORLDWIDE',
+}
+```
+
+There is no `TS` or `TGID` column, because every XLX module is TS2/TG9 on the wire. The module itself is `XLX_MODULE` in `hblink.cfg`. Each connection carries one module on one bridge; to bridge two modules, define two systems. Omit `XLX_BRIDGES` or leave it `{}` if you run no reflectors.
+
+An XLX system cannot be listed in `UNIT`. xlxd treats a private call to 4000-4026 as a link command, so a forwarded private call could unlink the connection.
 
 ## `UNIT`
 
