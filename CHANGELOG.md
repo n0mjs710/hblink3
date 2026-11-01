@@ -20,6 +20,13 @@ An XLX system with a `RADIO_ID` above 16777215, such as a 9-digit ID with an ESS
 is also a startup error. It previously raised an exception after login and sent no
 link.
 
+Two more silent XLX failures now stop at startup. `LOOSE: False` kept the login
+from completing, while the reflector still listed the connection with no module.
+An `XLX_BRIDGES` entry with a mistyped bridge name created a new bridge with only
+the XLX system on it, so its traffic went nowhere; an XLX system with no other
+members on its bridge is now an error. Two XLX systems sharing a bridge of their
+own are still accepted.
+
 XLX reflector setup is now documented in `CONFIGURING.md`.
 
 ### OpenBridge passphrase is used whole

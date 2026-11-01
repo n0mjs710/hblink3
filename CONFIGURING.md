@@ -170,7 +170,7 @@ An XLX reflector speaks the same protocol as any other Server, so it is a `MODE:
 | Field | Value for XLX |
 |---|---|
 | `XLX_MODULE` | The module letter, `A`-`Z`. A stock xlxd has only `A`-`J` and silently ignores any other letter. |
-| `LOOSE` | `True`. xlxd's login replies don't carry the radio ID that strict validation checks for. |
+| `LOOSE` | `True`; `False` is a startup error. xlxd's login replies don't carry the radio ID that strict validation checks for. |
 | `SERVER_PORT` | `62030`. |
 | `PASSPHRASE` | Usually `passw0rd`. |
 | `RADIO_ID` | A registered DMR ID that xlxd can look up, no larger than 16777215. A 9-digit ID with an ESSID is a startup error. |
@@ -313,7 +313,7 @@ It reads `hblink.cfg` to learn which systems are `OPENBRIDGE`, lifts each inline
 
 ## `XLX_BRIDGES`
 
-**XLX systems are configured here, not as inline `BRIDGES` members.** Listing one in `BRIDGES` is a startup error. Each entry maps an XLX system from `hblink.cfg` to one bridge by name. The name must match the bridge in `BRIDGES` exactly; any other name creates a new bridge with only the XLX system on it, and no error:
+**XLX systems are configured here, not as inline `BRIDGES` members.** Listing one in `BRIDGES` is a startup error. Each entry maps an XLX system from `hblink.cfg` to one bridge by name. The name must match the bridge exactly. A name that matches nothing creates a new bridge, so an XLX system left with no other members on its bridge is a startup error. Two XLX systems may share a bridge that isn't in `BRIDGES`, which links their modules:
 
 ```python
 XLX_BRIDGES = {

@@ -217,9 +217,9 @@ class TestExpandXLXBridges(unittest.TestCase):
 
     def test_ts_and_tgid_are_forced_to_2_and_9(self):
         # The whole point: these are injected, never read from the rules file.
-        bridges = {}
+        bridges = {'WORLDWIDE': [self._member('REPEATERS', 1, 3100)]}
         self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWIDE'})
-        _m = bridges['WORLDWIDE'][0]
+        _m = bridges['WORLDWIDE'][1]
         self.assertEqual((_m['TS'], _m['TGID']), (2, 9))
 
     def test_appends_alongside_existing_members(self):
@@ -230,9 +230,9 @@ class TestExpandXLXBridges(unittest.TestCase):
 
     def test_triggers_and_timers_are_inert(self):
         # No end user on an XLX connection to send ON/OFF/RESET TGIDs.
-        bridges = {}
+        bridges = {'WORLDWIDE': [self._member('REPEATERS', 1, 3100)]}
         self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWIDE'})
-        _m = bridges['WORLDWIDE'][0]
+        _m = bridges['WORLDWIDE'][1]
         self.assertEqual(_m['TO_TYPE'], 'NONE')
         self.assertEqual((_m['ON'], _m['OFF'], _m['RESET']), ([], [], []))
         self.assertTrue(_m['ACTIVE'])
@@ -241,6 +241,22 @@ class TestExpandXLXBridges(unittest.TestCase):
         bridges = {}
         self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WW', 'XLX068-A': 'WW'})
         self.assertEqual({_m['SYSTEM'] for _m in bridges['WW']}, {'XLX950-D', 'XLX068-A'})
+
+    def test_mistyped_bridge_name_is_fatal(self):
+        # Would otherwise create a bridge with only this system on it.
+        bridges = {'WORLDWIDE': [self._member('REPEATERS', 1, 3100)]}
+        with self.assertRaises(SystemExit):
+            self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWDE'})
+
+    def test_alone_on_an_empty_bridge_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            self.bridge.expand_xlx_bridges({'WORLDWIDE': []}, {'XLX950-D': 'WORLDWIDE'})
+
+    def test_bridge_from_obp_table_is_accepted(self):
+        # OBP_BRIDGES expands first, so its members count.
+        bridges = self.bridge.expand_obp_bridges({}, {'VESTA_OBP': {'WORLDWIDE': 1}})
+        self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWIDE'})
+        self.assertEqual(len(bridges['WORLDWIDE']), 2)
 
     def test_inline_xlx_member_is_fatal(self):
         bridges = {'WORLDWIDE': [self._member('XLX950-D', 2, 9)]}
