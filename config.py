@@ -154,6 +154,16 @@ def _parse_xlx_module(_config, _section):
                  'the talkgroup is derived from the letter.'.format(_section, _module))
     return _module
 
+# The XLX fields as the pre-2026 HBlink spelled them: MODE: XLXPEER and a numeric
+# XLXMODULE. An unknown option is otherwise ignored, so a migrated stanza would log
+# in normally and never send a link, leaving the system connected with no module.
+def _reject_legacy_xlx(_config, _section):
+    if _config.has_option(_section, 'XLXMODULE') or _config.get(_section, 'MODE') == 'XLXPEER':
+        sys.exit('XLX CONFIGURATION ERROR: system "{}" uses the old XLX settings. MODE: XLXPEER '
+                 'and XLXMODULE are no longer read. Use MODE: OUTBOUND and XLX_MODULE with the '
+                 'module letter (XLXMODULE: 4004 is XLX_MODULE: D), and map the system to a bridge '
+                 'in XLX_BRIDGES in rules.py. See hblink-SAMPLE.cfg.'.format(_section))
+
 OBP_PASSPHRASE_MAX = 80
 
 def _parse_obp_passphrase(_config, _section):
@@ -232,6 +242,7 @@ def build_config(_config_file):
                 })
 
             elif config.getboolean(section, 'ENABLED'):
+                _reject_legacy_xlx(config, section)
                 if config.get(section, 'MODE') == 'OUTBOUND':
                     CONFIG['SYSTEMS'].update({section: {
                         'MODE': config.get(section, 'MODE'),

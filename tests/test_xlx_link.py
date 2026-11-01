@@ -314,6 +314,27 @@ class TestXLXConfigValidation(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self._parse('1')
 
+    # --- settings from the pre-2026 HBlink -----------------------------------
+
+    def _reject(self, **_options):
+        self.parser.set('XLX-1', 'MODE', _options.pop('MODE', 'OUTBOUND'))
+        for _key, _value in _options.items():
+            self.parser.set('XLX-1', _key, _value)
+        self.config._reject_legacy_xlx(self.parser, 'XLX-1')
+
+    def test_legacy_key_is_fatal(self):
+        # Ignored, it logs in normally and never links: connected with no module.
+        with self.assertRaises(SystemExit) as _err:
+            self._reject(XLXMODULE='D')
+        self.assertIn('XLX_MODULE', str(_err.exception))
+
+    def test_legacy_mode_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            self._reject(MODE='XLXPEER')
+
+    def test_current_settings_are_not_legacy(self):
+        self._reject(XLX_MODULE='D')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
