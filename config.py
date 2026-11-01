@@ -170,6 +170,10 @@ def _reject_legacy_xlx(_config, _section):
 # sent to an upstream reflector. Catch it on any other mode rather than silently
 # ignoring it, since a misplaced field would otherwise look like it took effect.
 #
+# LOOSE must be True. xlxd's RPTACK carries no radio ID, so strict validation resets
+# the login after RPTK -- by which point xlxd has already added the client, and it
+# shows on the reflector as connected with no module.
+#
 # RADIO_ID is the source of the link call, and a DMRD source field is 3 bytes. A
 # larger ID (a 9-digit ID with an ESSID) cannot be sent. Shortening it would not
 # help, since xlxd looks up the login ID exactly as given in its DMR ID database.
@@ -182,6 +186,10 @@ def _validate_xlx_systems(_systems):
         if _sysconfig['MODE'] != 'OUTBOUND':
             sys.exit('XLX CONFIGURATION ERROR: system "{}" is MODE {} but sets XLX_MODULE. '
                      'XLX connections must be MODE: OUTBOUND.'.format(_system, _sysconfig['MODE']))
+        if not _sysconfig['LOOSE']:
+            sys.exit('XLX CONFIGURATION ERROR: system "{}" sets XLX_MODULE but has LOOSE: False. '
+                     'xlxd\'s login replies carry no radio ID, so XLX connections must use '
+                     'LOOSE: True.'.format(_system))
         _radio_id = int.from_bytes(_sysconfig['RADIO_ID'], 'big')
         if _radio_id > XLX_RADIO_ID_MAX:
             sys.exit('XLX CONFIGURATION ERROR: RADIO_ID {} for system "{}" is too large; the '

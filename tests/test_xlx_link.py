@@ -337,9 +337,10 @@ class TestXLXConfigValidation(unittest.TestCase):
 
     # --- finished system config ----------------------------------------------
 
-    def _validate(self, _radio_id, _module='D', _mode='OUTBOUND'):
+    def _validate(self, _radio_id, _module='D', _mode='OUTBOUND', _loose=True):
         self.config._validate_xlx_systems({'XLX-1': {
             'MODE': _mode,
+            'LOOSE': _loose,
             'XLX_MODULE': _module,
             'RADIO_ID': _radio_id.to_bytes(4, 'big'),
         }})
@@ -357,6 +358,14 @@ class TestXLXConfigValidation(unittest.TestCase):
 
     def test_large_radio_id_is_fine_without_xlx(self):
         self._validate(302123401, _module='')
+
+    def test_strict_validation_is_fatal(self):
+        # xlxd's RPTACK has no radio ID, so the login would reset after RPTK.
+        with self.assertRaises(SystemExit):
+            self._validate(312000, _loose=False)
+
+    def test_strict_validation_is_fine_without_xlx(self):
+        self._validate(312000, _module='', _loose=False)
 
     def test_xlx_module_on_server_is_fatal(self):
         with self.assertRaises(SystemExit):
