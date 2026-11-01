@@ -217,9 +217,9 @@ class TestExpandXLXBridges(unittest.TestCase):
 
     def test_ts_and_tgid_are_forced_to_2_and_9(self):
         # The whole point: these are injected, never read from the rules file.
-        bridges = {}
+        bridges = {'WORLDWIDE': [self._member('REPEATERS', 1, 3100)]}
         self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWIDE'})
-        _m = bridges['WORLDWIDE'][0]
+        _m = bridges['WORLDWIDE'][1]
         self.assertEqual((_m['TS'], _m['TGID']), (2, 9))
 
     def test_appends_alongside_existing_members(self):
@@ -230,9 +230,9 @@ class TestExpandXLXBridges(unittest.TestCase):
 
     def test_triggers_and_timers_are_inert(self):
         # No end user on an XLX connection to send ON/OFF/RESET TGIDs.
-        bridges = {}
+        bridges = {'WORLDWIDE': [self._member('REPEATERS', 1, 3100)]}
         self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWIDE'})
-        _m = bridges['WORLDWIDE'][0]
+        _m = bridges['WORLDWIDE'][1]
         self.assertEqual(_m['TO_TYPE'], 'NONE')
         self.assertEqual((_m['ON'], _m['OFF'], _m['RESET']), ([], [], []))
         self.assertTrue(_m['ACTIVE'])
@@ -241,6 +241,22 @@ class TestExpandXLXBridges(unittest.TestCase):
         bridges = {}
         self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WW', 'XLX068-A': 'WW'})
         self.assertEqual({_m['SYSTEM'] for _m in bridges['WW']}, {'XLX950-D', 'XLX068-A'})
+
+    def test_mistyped_bridge_name_is_fatal(self):
+        # Would otherwise create a bridge with only this system on it.
+        bridges = {'WORLDWIDE': [self._member('REPEATERS', 1, 3100)]}
+        with self.assertRaises(SystemExit):
+            self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWDE'})
+
+    def test_alone_on_an_empty_bridge_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            self.bridge.expand_xlx_bridges({'WORLDWIDE': []}, {'XLX950-D': 'WORLDWIDE'})
+
+    def test_bridge_from_obp_table_is_accepted(self):
+        # OBP_BRIDGES expands first, so its members count.
+        bridges = self.bridge.expand_obp_bridges({}, {'VESTA_OBP': {'WORLDWIDE': 1}})
+        self.bridge.expand_xlx_bridges(bridges, {'XLX950-D': 'WORLDWIDE'})
+        self.assertEqual(len(bridges['WORLDWIDE']), 2)
 
     def test_inline_xlx_member_is_fatal(self):
         bridges = {'WORLDWIDE': [self._member('XLX950-D', 2, 9)]}
@@ -313,6 +329,63 @@ class TestXLXConfigValidation(unittest.TestCase):
     def test_non_letter_is_rejected(self):
         with self.assertRaises(SystemExit):
             self._parse('1')
+
+    # --- settings from the pre-2026 HBlink -----------------------------------
+
+    def _reject(self, **_options):
+        self.parser.set('XLX-1', 'MODE', _options.pop('MODE', 'OUTBOUND'))
+        for _key, _value in _options.items():
+            self.parser.set('XLX-1', _key, _value)
+        self.config._reject_legacy_xlx(self.parser, 'XLX-1')
+
+    def test_legacy_key_is_fatal(self):
+        # Ignored, it logs in normally and never links: connected with no module.
+        with self.assertRaises(SystemExit) as _err:
+            self._reject(XLXMODULE='D')
+        self.assertIn('XLX_MODULE', str(_err.exception))
+
+    def test_legacy_mode_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            self._reject(MODE='XLXPEER')
+
+    def test_current_settings_are_not_legacy(self):
+        self._reject(XLX_MODULE='D')
+
+    # --- finished system config ----------------------------------------------
+
+    def _validate(self, _radio_id, _module='D', _mode='OUTBOUND', _loose=True):
+        self.config._validate_xlx_systems({'XLX-1': {
+            'MODE': _mode,
+            'LOOSE': _loose,
+            'XLX_MODULE': _module,
+            'RADIO_ID': _radio_id.to_bytes(4, 'big'),
+        }})
+
+    def test_largest_3_byte_radio_id_is_accepted(self):
+        self._validate(0xFFFFFF)
+        make_system(_radio_id=0xFFFFFF).send_xlx_link(4004)
+
+    def test_radio_id_over_3_bytes_is_fatal(self):
+        # send_xlx_link would raise OverflowError after the login had completed.
+        with self.assertRaises(SystemExit):
+            self._validate(0x1000000)
+        with self.assertRaises(SystemExit):
+            self._validate(302123401)
+
+    def test_large_radio_id_is_fine_without_xlx(self):
+        self._validate(302123401, _module='')
+
+    def test_strict_validation_is_fatal(self):
+        # xlxd's RPTACK has no radio ID, so the login would reset after RPTK.
+        with self.assertRaises(SystemExit):
+            self._validate(312000, _loose=False)
+
+    def test_strict_validation_is_fine_without_xlx(self):
+        self._validate(312000, _module='', _loose=False)
+
+    def test_xlx_module_on_server_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            self._validate(312000, _mode='SERVER')
 
 
 if __name__ == '__main__':

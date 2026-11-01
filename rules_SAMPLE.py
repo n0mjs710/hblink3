@@ -86,6 +86,8 @@ never acknowledges anything, so the traffic would simply vanish. Notes:
     * The module (A-Z) is set in hblink.cfg as XLX_MODULE, not here. One module
       per connection; to bridge two modules, configure two systems.
     * Leaving an XLX system as an inline BRIDGES member above is a startup ERROR.
+    * An XLX system with no other members on its bridge is a startup ERROR. This
+      is usually a mistyped bridge name.
     * An XLX system in UNIT (below) is a startup ERROR -- a private call to the
       reflector would change its module for everyone connected to it.
     * No timers or ON/OFF/RESET triggers: there is no end user on the connection.

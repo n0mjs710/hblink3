@@ -258,6 +258,11 @@ def expand_obp_bridges(_bridges, _obp_bridges):
 #
 # No timers, triggers, or ON/OFF/RESET lists: there is no end user on an XLX
 # connection to send them.
+#
+# A bridge name that matches nothing creates a new bridge, which is how two modules
+# bridge to each other with no BRIDGES entry. The same thing happens on a mistyped
+# name, so an XLX system left alone on its bridge is an error: it has nowhere to
+# send traffic.
 def expand_xlx_bridges(_bridges, _xlx_bridges):
     def _is_xlx(_sys):
         return _sys in CONFIG['SYSTEMS'] and CONFIG['SYSTEMS'][_sys].get('XLX_MODULE')
@@ -284,6 +289,11 @@ def expand_xlx_bridges(_bridges, _xlx_bridges):
         })
         logger.info('(ROUTER) XLX system %s (module %s) bridged to "%s" on TS%s/TG%s',
                     _xlx, CONFIG['SYSTEMS'][_xlx]['XLX_MODULE'], _bridge, XLX_TS, XLX_TGID)
+
+    for _xlx, _bridge in _xlx_bridges.items():
+        if len(_bridges[_bridge]) < 2:
+            sys.exit('ERROR: XLX_BRIDGES entry "{}" names bridge "{}", which has no other members. '
+                     'Check that the name matches a bridge in rules.py exactly.'.format(_xlx, _bridge))
 
     return _bridges
 

@@ -154,6 +154,48 @@ def _parse_xlx_module(_config, _section):
                  'the talkgroup is derived from the letter.'.format(_section, _module))
     return _module
 
+# The XLX fields as the pre-2026 HBlink spelled them: MODE: XLXPEER and a numeric
+# XLXMODULE. An unknown option is otherwise ignored, so a migrated stanza would log
+# in normally and never send a link, leaving the system connected with no module.
+def _reject_legacy_xlx(_config, _section):
+    if _config.has_option(_section, 'XLXMODULE') or _config.get(_section, 'MODE') == 'XLXPEER':
+        sys.exit('XLX CONFIGURATION ERROR: system "{}" uses the old XLX settings. MODE: XLXPEER '
+                 'and XLXMODULE are no longer read. Use MODE: OUTBOUND and XLX_MODULE with the '
+                 'module letter (XLXMODULE: 4004 is XLX_MODULE: D), and map the system to a bridge '
+                 'in XLX_BRIDGES in rules.py. See hblink-SAMPLE.cfg.'.format(_section))
+
+# Checks on an XLX system that need its finished config.
+#
+# XLX_MODULE is only meaningful on an OUTBOUND system: it is a client-side link
+# sent to an upstream reflector. Catch it on any other mode rather than silently
+# ignoring it, since a misplaced field would otherwise look like it took effect.
+#
+# LOOSE must be True. xlxd's RPTACK carries no radio ID, so strict validation resets
+# the login after RPTK -- by which point xlxd has already added the client, and it
+# shows on the reflector as connected with no module.
+#
+# RADIO_ID is the source of the link call, and a DMRD source field is 3 bytes. A
+# larger ID (a 9-digit ID with an ESSID) cannot be sent. Shortening it would not
+# help, since xlxd looks up the login ID exactly as given in its DMR ID database.
+XLX_RADIO_ID_MAX = 0xFFFFFF
+
+def _validate_xlx_systems(_systems):
+    for _system, _sysconfig in _systems.items():
+        if not _sysconfig.get('XLX_MODULE'):
+            continue
+        if _sysconfig['MODE'] != 'OUTBOUND':
+            sys.exit('XLX CONFIGURATION ERROR: system "{}" is MODE {} but sets XLX_MODULE. '
+                     'XLX connections must be MODE: OUTBOUND.'.format(_system, _sysconfig['MODE']))
+        if not _sysconfig['LOOSE']:
+            sys.exit('XLX CONFIGURATION ERROR: system "{}" sets XLX_MODULE but has LOOSE: False. '
+                     'xlxd\'s login replies carry no radio ID, so XLX connections must use '
+                     'LOOSE: True.'.format(_system))
+        _radio_id = int.from_bytes(_sysconfig['RADIO_ID'], 'big')
+        if _radio_id > XLX_RADIO_ID_MAX:
+            sys.exit('XLX CONFIGURATION ERROR: RADIO_ID {} for system "{}" is too large; the '
+                     'maximum is {}. Use the registered DMR ID without an ESSID suffix.'
+                     .format(_radio_id, _system, XLX_RADIO_ID_MAX))
+
 OBP_PASSPHRASE_MAX = 80
 
 def _parse_obp_passphrase(_config, _section):
@@ -232,6 +274,7 @@ def build_config(_config_file):
                 })
 
             elif config.getboolean(section, 'ENABLED'):
+                _reject_legacy_xlx(config, section)
                 if config.get(section, 'MODE') == 'OUTBOUND':
                     CONFIG['SYSTEMS'].update({section: {
                         'MODE': config.get(section, 'MODE'),
@@ -318,13 +361,7 @@ def build_config(_config_file):
     except configparser.Error as err:
         sys.exit('Error processing configuration file -- {}'.format(err))
 
-    # XLX_MODULE is only meaningful on an OUTBOUND system: it is a client-side link
-    # sent to an upstream reflector. Catch it on any other mode rather than silently
-    # ignoring it, since a misplaced field would otherwise look like it took effect.
-    for _system, _sysconfig in CONFIG['SYSTEMS'].items():
-        if _sysconfig.get('XLX_MODULE') and _sysconfig['MODE'] != 'OUTBOUND':
-            sys.exit('XLX CONFIGURATION ERROR: system "{}" is MODE {} but sets XLX_MODULE. '
-                     'XLX connections must be MODE: OUTBOUND.'.format(_system, _sysconfig['MODE']))
+    _validate_xlx_systems(CONFIG['SYSTEMS'])
 
     process_acls(CONFIG)
 

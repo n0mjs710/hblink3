@@ -5,6 +5,30 @@ baseline of the current state rather than enumerating the project's full history
 
 ## [Unreleased]
 
+### XLX configuration errors stop at startup
+
+A system with the older `XLXMODULE` setting logged in to xlxd normally but never
+sent a module link, because the setting was silently ignored. It showed as
+connected with no module. `XLXMODULE` and `MODE: XLXPEER` now stop HBlink3 at
+startup with an error naming the replacement.
+
+**Action required** if a stanza uses either one: change it to `MODE: OUTBOUND` and
+`XLX_MODULE` with the module letter (`XLXMODULE: 4004` becomes `XLX_MODULE: D`),
+and map the system to a bridge in `XLX_BRIDGES` in `rules.py`.
+
+An XLX system with a `RADIO_ID` above 16777215, such as a 9-digit ID with an ESSID,
+is also a startup error. It previously raised an exception after login and sent no
+link.
+
+Two more silent XLX failures now stop at startup. `LOOSE: False` kept the login
+from completing, while the reflector still listed the connection with no module.
+An `XLX_BRIDGES` entry with a mistyped bridge name created a new bridge with only
+the XLX system on it, so its traffic went nowhere; an XLX system with no other
+members on its bridge is now an error. Two XLX systems sharing a bridge of their
+own are still accepted.
+
+XLX reflector setup is now documented in `CONFIGURING.md`.
+
 ### OpenBridge passphrase is used whole
 
 An OPENBRIDGE `PASSPHRASE` longer than 20 characters was silently cut to its
