@@ -335,6 +335,33 @@ class TestXLXConfigValidation(unittest.TestCase):
     def test_current_settings_are_not_legacy(self):
         self._reject(XLX_MODULE='D')
 
+    # --- finished system config ----------------------------------------------
+
+    def _validate(self, _radio_id, _module='D', _mode='OUTBOUND'):
+        self.config._validate_xlx_systems({'XLX-1': {
+            'MODE': _mode,
+            'XLX_MODULE': _module,
+            'RADIO_ID': _radio_id.to_bytes(4, 'big'),
+        }})
+
+    def test_largest_3_byte_radio_id_is_accepted(self):
+        self._validate(0xFFFFFF)
+        make_system(_radio_id=0xFFFFFF).send_xlx_link(4004)
+
+    def test_radio_id_over_3_bytes_is_fatal(self):
+        # send_xlx_link would raise OverflowError after the login had completed.
+        with self.assertRaises(SystemExit):
+            self._validate(0x1000000)
+        with self.assertRaises(SystemExit):
+            self._validate(302123401)
+
+    def test_large_radio_id_is_fine_without_xlx(self):
+        self._validate(302123401, _module='')
+
+    def test_xlx_module_on_server_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            self._validate(312000, _mode='SERVER')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

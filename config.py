@@ -164,6 +164,30 @@ def _reject_legacy_xlx(_config, _section):
                  'module letter (XLXMODULE: 4004 is XLX_MODULE: D), and map the system to a bridge '
                  'in XLX_BRIDGES in rules.py. See hblink-SAMPLE.cfg.'.format(_section))
 
+# Checks on an XLX system that need its finished config.
+#
+# XLX_MODULE is only meaningful on an OUTBOUND system: it is a client-side link
+# sent to an upstream reflector. Catch it on any other mode rather than silently
+# ignoring it, since a misplaced field would otherwise look like it took effect.
+#
+# RADIO_ID is the source of the link call, and a DMRD source field is 3 bytes. A
+# larger ID (a 9-digit ID with an ESSID) cannot be sent. Shortening it would not
+# help, since xlxd looks up the login ID exactly as given in its DMR ID database.
+XLX_RADIO_ID_MAX = 0xFFFFFF
+
+def _validate_xlx_systems(_systems):
+    for _system, _sysconfig in _systems.items():
+        if not _sysconfig.get('XLX_MODULE'):
+            continue
+        if _sysconfig['MODE'] != 'OUTBOUND':
+            sys.exit('XLX CONFIGURATION ERROR: system "{}" is MODE {} but sets XLX_MODULE. '
+                     'XLX connections must be MODE: OUTBOUND.'.format(_system, _sysconfig['MODE']))
+        _radio_id = int.from_bytes(_sysconfig['RADIO_ID'], 'big')
+        if _radio_id > XLX_RADIO_ID_MAX:
+            sys.exit('XLX CONFIGURATION ERROR: RADIO_ID {} for system "{}" is too large; the '
+                     'maximum is {}. Use the registered DMR ID without an ESSID suffix.'
+                     .format(_radio_id, _system, XLX_RADIO_ID_MAX))
+
 OBP_PASSPHRASE_MAX = 80
 
 def _parse_obp_passphrase(_config, _section):
@@ -329,13 +353,7 @@ def build_config(_config_file):
     except configparser.Error as err:
         sys.exit('Error processing configuration file -- {}'.format(err))
 
-    # XLX_MODULE is only meaningful on an OUTBOUND system: it is a client-side link
-    # sent to an upstream reflector. Catch it on any other mode rather than silently
-    # ignoring it, since a misplaced field would otherwise look like it took effect.
-    for _system, _sysconfig in CONFIG['SYSTEMS'].items():
-        if _sysconfig.get('XLX_MODULE') and _sysconfig['MODE'] != 'OUTBOUND':
-            sys.exit('XLX CONFIGURATION ERROR: system "{}" is MODE {} but sets XLX_MODULE. '
-                     'XLX connections must be MODE: OUTBOUND.'.format(_system, _sysconfig['MODE']))
+    _validate_xlx_systems(CONFIG['SYSTEMS'])
 
     process_acls(CONFIG)
 
